@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/scripts/lib/agents.sh"
 source "$SCRIPT_DIR/scripts/lib/display.sh"
 source "$SCRIPT_DIR/scripts/lib/args.sh"
 source "$SCRIPT_DIR/scripts/lib/execution.sh"
+source "$SCRIPT_DIR/scripts/lib/summary.sh"
 
 # Timing
 START_TIME=$(date +%s)
@@ -48,6 +49,7 @@ FULL_OUTPUT_FILE=""
 # Set up traps
 trap cleanup EXIT
 trap handle_interrupt INT
+trap handle_terminate TERM
 
 # Parse arguments (sets MAX_ITERATIONS, ONCE_FLAG, RALPH_AGENT, AGENT_EXTRA_ARGS)
 parse_arguments "$@"

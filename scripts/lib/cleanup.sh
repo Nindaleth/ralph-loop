@@ -1,7 +1,7 @@
 #!/bin/bash
 # Cleanup module for ralph.sh
 # Signal handlers and process cleanup
-# Dependencies: constants.sh
+# Dependencies: constants.sh, summary.sh
 #
 # Properly cleans up all background processes and temporary files on exit.
 # Runs on both normal exit (EXIT trap) and interrupt (called from handle_interrupt).
@@ -48,6 +48,7 @@ cleanup() {
   fi
   CLEANUP_DONE=1
   stop_agent_container
+  stop_agent_process
 
   # Kill spinner background process
   if [ -n "$SPINNER_PID" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then
@@ -55,8 +56,6 @@ cleanup() {
     wait "$SPINNER_PID" 2>/dev/null || true
   fi
   SPINNER_PID=""
-
-  stop_agent_process
 
   # Stop only the deterministic sandbox for this Ralph invocation.
   if [ "${RALPH_AGENT:-}" != "opencode" ] && [ -n "$RALPH_SANDBOX_NAME" ] && command -v sbx &>/dev/null; then
@@ -72,6 +71,8 @@ cleanup() {
     kill "$timeout_pid" 2>/dev/null || true
     wait "$timeout_pid" 2>/dev/null || true
   fi
+
+  print_summary
 
   # Remove temporary files
   [[ -n "$STEP_FILE" ]] && rm -f "$STEP_FILE" 2>/dev/null || true
@@ -93,6 +94,7 @@ handle_interrupt() {
     # The EXIT trap will run cleanup exactly once.
     echo ""
     echo -e "${Y}Exiting...${R}"
+    STOP_REASON="interrupted (Ctrl+C)"
     exit 130
   else
     # First CTRL+C - show warning and update timestamp
