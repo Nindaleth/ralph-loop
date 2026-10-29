@@ -74,3 +74,18 @@ remaining_task_count() {
 passes_snapshot() {
   jq -c 'map({key: .id, value: (.passes == true)}) | from_entries' "$TASKS_FILE"
 }
+
+# Set every task's passes to its value in snapshot_json, keeping all other fields.
+restore_passes() {
+  local snapshot="$1" restored
+  restored=$(jq --argjson snap "$snapshot" \
+    'map(.id as $id | if ($snap | has($id)) then .passes = $snap[$id] else . end)' "$TASKS_FILE") || return 1
+  printf '%s\n' "$restored" > "$TASKS_FILE"
+}
+
+# Commit only the tasks file, and only when it differs from HEAD.
+commit_bookkeeping() {
+  local message="$1"
+  git diff --quiet HEAD -- "$TASKS_FILE" && return 0
+  git commit -q -m "$message" -- "$TASKS_FILE"
+}

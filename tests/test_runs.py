@@ -1,14 +1,10 @@
 import json
-import os
 from pathlib import Path
 import tempfile
 import time
 import unittest
 
-from tests.support import bash_in, event, make_project
-
-
-CID = "a" * 64
+from tests.support import CID, bash_in, event, install_fakes, make_project
 
 
 class RunDeadlineTests(unittest.TestCase):
@@ -17,13 +13,8 @@ class RunDeadlineTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.base = Path(tmp.name)
         self.project = make_project(self.base, [{"id": "TASK-1", "passes": False}])
-        (self.base / "bin").mkdir()
-        self.calls = self.base / "calls"
-        docker = self.base / "bin/docker"
-        docker.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS"\n')
-        docker.chmod(0o755)
-        self.env = {"HOME": str(self.base), "CALLS": str(self.calls),
-                    "PATH": f"{self.base / 'bin'}:{os.environ['PATH']}"}
+        self.env = install_fakes(self.base)
+        self.calls = Path(self.env["CALLS"])
 
     def test_timed_out_run_stops_its_container_and_returns(self):
         (self.base / "bin/ocd.sh").write_text(

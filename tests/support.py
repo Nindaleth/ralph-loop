@@ -51,5 +51,23 @@ def bash_in(project, code, env=None):
                                **(env or {})})
 
 
+CID = "a" * 64
+
+# Wrapper stand-in that records a container ID and runs the command locally.
+LOCAL_OCD = f'printf %s {CID} > "$OCD_CIDFILE"\nexec "$@"\n'
+
+
+def install_fakes(base, ocd_script=LOCAL_OCD):
+    """Put a recording docker and the given ocd.sh under base/bin; return the env."""
+    bin_dir = Path(base) / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    docker = bin_dir / "docker"
+    docker.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+    docker.chmod(0o755)
+    (bin_dir / "ocd.sh").write_text(ocd_script)
+    return {"HOME": str(base), "CALLS": str(Path(base) / "calls"),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+
 def tasks_of(project):
     return json.loads((Path(project) / ".agent/tasks.json").read_text())
