@@ -33,7 +33,7 @@ is_environment_failure() {
     started=$(jq -Rn '[inputs | fromjson? | select(type == "object" and has("sessionID"))]
       | length' "$history_file")
     if [ "$started" = 0 ]; then
-      ENV_FAILURE_DETAIL=$(grep -v '^[[:space:]]*$' "$history_file" | tail -n 1)
+      ENV_FAILURE_DETAIL=$(grep -v -e '^[[:space:]]*$' -e '^Script \(started\|done\) on ' "$history_file" | tail -n 1)
       ENV_FAILURE_DETAIL="${ENV_FAILURE_DETAIL:-wrapper exited with status $exit_status}"
       return 0
     fi

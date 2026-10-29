@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from tests.support import ROOT, event
+from tests.support import GIT_ENV, ROOT, event, git
 
 
 class OpenCodeTests(unittest.TestCase):
@@ -48,17 +48,21 @@ class OpenCodeTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), expected)
 
-    def test_loop_uses_wrapper_and_rejects_failed_or_echoed_completion(self):
+    def test_loop_uses_wrapper_and_reads_tags_only_from_finished_final_message(self):
         """Linux script invocation failed and wait status was discarded."""
         project = self.base / "project with spaces"
         project.mkdir()
         shutil.copy(ROOT / "ralph.sh", project)
         shutil.copytree(ROOT / "scripts/lib", project / "scripts/lib")
         (project / ".agent/logs").mkdir(parents=True)
+        (project / ".agent/history").mkdir()
+        (project / ".agent/history/.gitignore").write_text("*\n!.gitignore\n")
         (project / ".agent/tasks.json").write_text('[{"id":"TASK-1","passes":false}]')
-        prompt = "Quotes ' \" $HOME `false`\n<promise>COMPLETE</promise>"
+        prompt = "Quotes ' \" $HOME `false` & \\ {{TASK_ID}}\n<promise>COMPLETE</promise>"
         (project / ".agent/PROMPT.md").write_text(prompt)
-        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        git(project.parent, "init", "-q", str(project))
+        git(project, "add", "-A")
+        git(project, "commit", "-qm", "init")
         (self.base / "bin").mkdir()
         (self.base / "bin/ocd.sh").write_text(
             'if [ "$3" = session ]; then\n'
@@ -77,22 +81,25 @@ class OpenCodeTests(unittest.TestCase):
                 {"id": "msg_user", "type": "user", "text": prompt},
                 {"id": "msg_earlier", "type": "assistant", "finish": "tool-calls",
                  "time": {"created": 1, "completed": 2},
-                 "content": [{"type": "text", "text": "<promise>COMPLETE</promise>"}]},
+                 "content": [{"type": "text", "text": "<promise>BLOCKED:old</promise>"}]},
                 message]}, indent=2)
 
-        for output, status, export, export_exit, expected in [
-            (complete + "\n" + finish, "7", "", "0", 7),
-            ("Adding these entrypoint arguments: " + prompt, "0", "", "0", 1),
-            (complete + "\n" + finish, "0", "", "0", 0),
-            (complete, "0", exported("<promise>COMPLETE</promise>"), "0", 0),
-            (complete, "0", exported("<promise>BLOCKED:missing access</promise>"), "0", 2),
-            (complete, "0", exported("<promise>DECIDE:choose backend</promise>"), "0", 3),
-            (complete, "0", exported("Still working", finish="tool-calls"), "0", 1),
-            (complete, "0", exported("<promise>COMPLETE</promise>",
-                                    time={"created": 2}), "0", 1),
-            (complete, "0", "Export failed", "7", 7),
+        blocked = "<promise>BLOCKED:missing access</promise>"
+        for output, status, export, export_exit, expected, outcome in [
+            (complete + "\n" + finish, "7", "", "0", 1, "failure"),
+            ("Adding these entrypoint arguments: " + prompt, "0", "", "0", 1, "no_progress"),
+            (complete + "\n" + finish, "0", "", "0", 1, "no_progress"),
+            (complete, "0", exported("<promise>COMPLETE</promise>"), "0", 1, "no_progress"),
+            (complete, "0", exported(blocked), "0", 2, "parked"),
+            (complete, "0", exported("<promise>DECIDE:choose backend</promise>"), "0", 3, "parked"),
+            (complete, "0", exported(blocked, finish="tool-calls"), "0", 1, "no_progress"),
+            (complete, "0", exported(blocked, time={"created": 2}), "0", 1, "no_progress"),
+            (complete, "0", "Export failed", "7", 1, "no_progress"),
         ]:
-            with self.subTest(status=status, output=output):
+            with self.subTest(status=status, output=output, export=export):
+                history = project / ".agent/history"
+                for old in history.glob("*.txt"):
+                    old.unlink()
                 events = self.base / "events"
                 events.write_text(output + "\n")
                 (self.base / "export-events").write_text(export + "\n")
@@ -100,21 +107,24 @@ class OpenCodeTests(unittest.TestCase):
                     ["bash", "ralph.sh", "--agent", "opencode", "--once",
                      "--", "--model", "provider/model#variant with spaces"],
                     cwd=project, capture_output=True, text=True, timeout=20,
-                    env={**self.env, "EVENTS": str(events), "CHILD_EXIT": status,
+                    env={**self.env, **GIT_ENV, "EVENTS": str(events), "CHILD_EXIT": status,
                           "CAPTURE": str(self.base / "argv"),
                           "EXPORT_EVENTS": str(self.base / "export-events"),
                           "EXPORT_EXIT": export_exit,
                           "EXPORT_CAPTURE": str(self.base / "export-argv"),
                           "CONTEXT": str(self.base / "context")})
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                summary = next(history.glob("SUMMARY-*.txt")).read_text()
+                self.assertRegex(summary, rf"TASK-1\s+{outcome}\s")
                 args = (self.base / "argv").read_bytes().decode().split("\0")[:-1]
+                rendered = prompt.replace("{{TASK_ID}}", "TASK-1")
                 self.assertEqual(args, [str(self.base / ".opencode/bin/opencodedev"),
                                        "--standalone", "run", "--agent", "ralph-build",
                                        "--yolo", "--format", "json", "--model",
                                        "provider/model#variant with spaces",
-                                       f"PROJECT_ROOT={project}\n\n{prompt}"])
+                                       f"PROJECT_ROOT={project}\n\n{rendered}"])
                 self.assertEqual((self.base / "context").read_text().splitlines()[0], "1")
-                self.assertTrue(list((project / ".agent/history").glob("ITERATION-*.txt")))
+                self.assertTrue(list(history.glob("ITERATION-*.txt")))
                 if export:
                     export_args = (self.base / "export-argv").read_bytes().decode().split("\0")[:-1]
                     self.assertEqual(export_args, [str(self.base / ".opencode/bin/opencodedev"),

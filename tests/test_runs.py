@@ -70,8 +70,10 @@ class RunDeadlineTests(unittest.TestCase):
             ([started, err(budget)], "1", "0", True, "Copilot budget"),
             ([started, err("429 Too Many Requests")], "1", "0", True, "429"),
             ([started, err("TypeError: x is undefined")], "1", "0", False, ""),
-            (["docker: Error response from daemon: oops"], "125", "0", True,
-             "docker: Error response from daemon: oops"),
+            (['Script started on 2026-10-29 22:05:33+01:00 [COMMAND="bash -c x"]',
+              "docker: Error response from daemon: oops", "",
+              'Script done on 2026-10-29 22:05:33+01:00 [COMMAND_EXIT_CODE="125"]'],
+             "125", "0", True, "yes:docker: Error response from daemon: oops"),
             ([started, event("text", text="the network test failed")], "1", "0", False, ""),
         ]
         history = self.base / "history"

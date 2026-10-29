@@ -49,6 +49,9 @@ cleanup() {
   CLEANUP_DONE=1
   stop_agent_container
   stop_agent_process
+  if [ -n "${SLEEP_PID:-}" ]; then
+    kill "$SLEEP_PID" 2>/dev/null || true
+  fi
 
   # Kill spinner background process
   if [ -n "$SPINNER_PID" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then

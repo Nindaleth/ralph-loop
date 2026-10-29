@@ -27,6 +27,12 @@ source "$SCRIPT_DIR/scripts/lib/display.sh"
 source "$SCRIPT_DIR/scripts/lib/args.sh"
 source "$SCRIPT_DIR/scripts/lib/execution.sh"
 source "$SCRIPT_DIR/scripts/lib/summary.sh"
+source "$SCRIPT_DIR/scripts/lib/tasks.sh"
+source "$SCRIPT_DIR/scripts/lib/outcome.sh"
+source "$SCRIPT_DIR/scripts/lib/check.sh"
+source "$SCRIPT_DIR/scripts/lib/progress.sh"
+source "$SCRIPT_DIR/scripts/lib/park.sh"
+source "$SCRIPT_DIR/scripts/lib/loop.sh"
 
 # Timing
 START_TIME=$(date +%s)
@@ -73,222 +79,90 @@ check_ansi_support
 show_ralph
 echo -e " ${C}Starting Ralph${R} ・ ${Y}v$VERSION${R} ・ Agent: ${Y}$RALPH_AGENT_NAME${R} ・ Sandbox: ${Y}$RALPH_SANDBOX_NAME${R} ・ Max iterations: ${Y}$MAX_ITERATIONS${R}"
 echo ""
+git rev-parse -q --verify HEAD >/dev/null || stop_loop "the repository has no commits yet" "$EXIT_SETUP_ERROR"
+validate_tasks || stop_loop "invalid tasks.json" "$EXIT_SETUP_ERROR"
 
-for i in $(seq 1 $MAX_ITERATIONS); do
-  ITERATION_START=$(date +%s)
+RUNS_USED=0
+STALLS=0
+ENV_STREAK=0
+OUTAGE_START=0
+ATTEMPT=0
+NOTE=""
 
-  # Initialize step timing for this iteration
-  init_iteration_step_times
+while true; do
+  TASK_ID=$(next_task_id)
+  if [ -z "$TASK_ID" ]; then
+    if [ "$(remaining_task_count)" = 0 ]; then
+      stop_loop "all tasks complete" "$EXIT_COMPLETE"
+    fi
+    stop_loop "every remaining task is parked or depends on a parked task" "$EXIT_ALL_PARKED"
+  fi
+  if [ "$RUNS_USED" -ge "$MAX_ITERATIONS" ]; then
+    stop_loop "used all $MAX_ITERATIONS runs" "$EXIT_MAX_ITERATIONS"
+  fi
+  ATTEMPT=$((ATTEMPT + 1))
+  FOUNDATION_WAS_DONE=0
+  if foundation_done; then
+    FOUNDATION_WAS_DONE=1
+  fi
 
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-  echo -e "  ↪ ${R}Iteration ${Y}$i${R} of ${Y}$MAX_ITERATIONS${R}"
+  echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R} (attempt $ATTEMPT)"
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-  echo -e ""
+  echo ""
 
-  # Run Agent with the ralph prompt (prepend PROJECT_ROOT)
-  PROMPT_CONTENT="PROJECT_ROOT=$SCRIPT_DIR
-
-$(cat "$SCRIPT_DIR/.agent/PROMPT.md")"
-
-  # Start spinner
-  start_spinner
-
-  # Initialize rolling preview
-  init_rolling_preview
-
-  ATTEMPT=$i
-  capture_agent_output
-  if [ "$AGENT_EXIT_STATUS" -ne 0 ]; then
-    stop_spinner
-    clear_rolling_preview
-    printf '\nAgent exited with status %s. Output saved to %s\n' \
-      "$AGENT_EXIT_STATUS" "$HISTORY_FILE" >&2
-    tail -n 15 "$HISTORY_FILE" >&2
-    exit "$AGENT_EXIT_STATUS"
+  if ! run_attempt "$TASK_ID" "$NOTE"; then
+    record_run "$ATTEMPT" "$TASK_ID" "${RUN_OUTCOME:-error}" "${RUN_SECONDS:-0}" "$RUN_DETAIL"
+    stop_loop "$RUN_DETAIL" "$EXIT_SETUP_ERROR"
   fi
-  if [ "$RESULT_RECOVERY_FAILED" = 1 ]; then
-    stop_spinner
-    clear_rolling_preview
-    printf '\nCannot recover the OpenCode final result. Run output: %s\n' "$HISTORY_FILE" >&2
-    tail -n 15 "$HISTORY_FILE" >&2
-    exit "$RECOVERY_EXIT_STATUS"
-  fi
+  record_run "$ATTEMPT" "$TASK_ID" "$RUN_OUTCOME" "$RUN_SECONDS" "$RUN_DETAIL"
+  echo -e "${G}  └── $RUN_OUTCOME${R} ${C}│${R} $TASK_ID ${C}│${R} ${Y}$(format_duration "$RUN_SECONDS")${R} ${C}│${R} $RUN_DETAIL"
 
-  # Check for Docker daemon not ready error
-  if echo "$OUTPUT" | grep -q "docker daemon not ready"; then
-    stop_spinner
-    clear_rolling_preview
-    echo ""
-    echo -e "${RD}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-    echo -e "  ❌ ${RD}Docker Error${R}"
-    echo -e "  Docker daemon is not ready. Please ensure Docker is running."
-    echo -e "${RD}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-    rm -f "$OUTPUT_FILE" "$FULL_OUTPUT_FILE"
-    exit $EXIT_DOCKER_ERROR
-  fi
-
-  # Check for invalid API key / authentication error
-  if echo "$OUTPUT" | grep -q "Invalid API key"; then
-    stop_spinner
-    clear_rolling_preview
-    echo ""
-    echo -e "${RD}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-    echo -e "  ❌ ${RD}Authentication Error${R}"
-    echo -e "  Invalid API key. Please authenticate inside the Docker sandbox."
-    echo -e ""
-    echo -e "  Run the following command and follow the login instructions:"
-    echo -e "  ${C}$(agent_login_command "$RALPH_AGENT" "$RALPH_SANDBOX_NAME")${R}"
-    echo -e "${RD}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-    rm -f "$OUTPUT_FILE" "$FULL_OUTPUT_FILE"
-    exit $EXIT_AUTH_ERROR
-  fi
-
-  if [ "$RALPH_AGENT" = "opencode" ]; then
-    OUTPUT="$FINAL_SUMMARY"
-  fi
-
-  rm -f "$FULL_OUTPUT_FILE"
-  FULL_OUTPUT_FILE=""  # Clear after removal
-
-  # Stop spinner
-  stop_spinner
-
-  # Finalize step timing for this iteration (record time spent in last step)
-  record_step_time ""
-
-  # Clear rolling preview area to make room for summary
-  clear_rolling_preview
-
-  # Display the final summary (persists after iteration)
-  if [ -n "$FINAL_SUMMARY" ]; then
-    display_final_summary "$FINAL_SUMMARY" 10
-  else
-    # Fallback: show last 10 lines of parsed output if no result found
-    FALLBACK_SUMMARY=$(echo "$OUTPUT" | tail -n 10)
-    if [ -n "$FALLBACK_SUMMARY" ]; then
-      display_final_summary "$FALLBACK_SUMMARY" 10
-    fi
-  fi
-
-  # Clean up the raw output file (history file already saved)
-  rm -f "$OUTPUT_FILE"
-  OUTPUT_FILE=""  # Clear after removal
-
-  # Calculate iteration duration
-  ITERATION_END=$(date +%s)
-  ITERATION_DURATION=$((ITERATION_END - ITERATION_START))
-  ITERATION_TIMES+=($ITERATION_DURATION)
-  TOTAL_ITERATION_TIME=$((TOTAL_ITERATION_TIME + ITERATION_DURATION))
-  ITERATION_AVG=$((TOTAL_ITERATION_TIME / ${#ITERATION_TIMES[@]}))
-  ITERATION_STR=$(format_duration $ITERATION_DURATION)
-  AVG_STR=$(format_duration $ITERATION_AVG)
-  DELTA_STR=$(format_delta $ITERATION_DURATION $PREV_ITERATION_TIME)
-  PREV_ITERATION_TIME=$ITERATION_DURATION
-  COMPLETED_TASK_IDS=$(format_completed_task_ids "$(printf '%s\n%s' "$OUTPUT" "$FINAL_SUMMARY")")
-  TASK_IDS_SEGMENT=""
-  if [ -n "$COMPLETED_TASK_IDS" ]; then
-    TASK_IDS_SEGMENT=" ${C}│${R} Tasks: ${Y}$COMPLETED_TASK_IDS${R}"
-  fi
-
-  # Check for completion signal
-  # Note: We check both $OUTPUT and $FINAL_SUMMARY because some agents emit
-  # structured output where FINAL_SUMMARY has a cleaner final message.
-  if has_complete_tag "$OUTPUT" || has_complete_tag "$FINAL_SUMMARY"; then
-    ELAPSED=$(($(date +%s) - START_TIME))
-    ELAPSED_STR=$(format_duration $ELAPSED)
-    echo ""
-    echo -e "${GR}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-    echo -e "  🎉 ${GR}Ralph completed all tasks!${R}"
-    echo -e "  ✅ Finished at iteration ${GR}$i${R} of ${GR}$MAX_ITERATIONS${R}"
-    if [ -n "$DELTA_STR" ]; then
-      echo -e "  ⏱️  Iteration $i: ${Y}$ITERATION_STR${R} ($DELTA_STR) ${C}│${R} Average: ${Y}$AVG_STR${R}$TASK_IDS_SEGMENT"
-    else
-      echo -e "  ⏱️  Iteration $i: ${Y}$ITERATION_STR${R} ${C}│${R} Average: ${Y}$AVG_STR${R}$TASK_IDS_SEGMENT"
-    fi
-    echo -e "  ⏱️  Total time: ${Y}$ELAPSED_STR${R}"
-    display_session_step_totals
-    echo -e "${GR}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-    exit $EXIT_COMPLETE
-  fi
-
-  # Check for BLOCKED tag - agent needs human help
-  # Check both $OUTPUT and $FINAL_SUMMARY (see completion signal comment above)
-  if has_blocked_tag "$OUTPUT" || has_blocked_tag "$FINAL_SUMMARY"; then
-    BLOCKED_REASON=$(extract_blocked_reason "$OUTPUT")
-    # If not found in OUTPUT, try FINAL_SUMMARY
-    [ -z "$BLOCKED_REASON" ] && BLOCKED_REASON=$(extract_blocked_reason "$FINAL_SUMMARY")
-    ELAPSED=$(($(date +%s) - START_TIME))
-    ELAPSED_STR=$(format_duration $ELAPSED)
-    play_notification_sound
-    show_notification "Ralph - BLOCKED" "$BLOCKED_REASON"
-    display_blocked_message "$BLOCKED_REASON" "$i"
-    if [ -n "$DELTA_STR" ]; then
-      echo -e "  ⏱️  Iteration $i: ${Y}$ITERATION_STR${R} ($DELTA_STR) ${C}│${R} Average: ${Y}$AVG_STR${R}$TASK_IDS_SEGMENT"
-    else
-      echo -e "  ⏱️  Iteration $i: ${Y}$ITERATION_STR${R} ${C}│${R} Average: ${Y}$AVG_STR${R}$TASK_IDS_SEGMENT"
-    fi
-    echo -e "  ⏱️  Total time: ${Y}$ELAPSED_STR${R}"
-    display_session_step_totals
-    exit $EXIT_BLOCKED
-  fi
-
-  # Check for DECIDE tag - agent needs human decision
-  # Check both $OUTPUT and $FINAL_SUMMARY (see completion signal comment above)
-  if has_decide_tag "$OUTPUT" || has_decide_tag "$FINAL_SUMMARY"; then
-    DECIDE_QUESTION=$(extract_decide_question "$OUTPUT")
-    # If not found in OUTPUT, try FINAL_SUMMARY
-    [ -z "$DECIDE_QUESTION" ] && DECIDE_QUESTION=$(extract_decide_question "$FINAL_SUMMARY")
-    ELAPSED=$(($(date +%s) - START_TIME))
-    ELAPSED_STR=$(format_duration $ELAPSED)
-    play_notification_sound
-    show_notification "Ralph - Decision Needed" "$DECIDE_QUESTION"
-    display_decide_message "$DECIDE_QUESTION" "$i"
-    if [ -n "$DELTA_STR" ]; then
-      echo -e "  ⏱️  Iteration $i: ${Y}$ITERATION_STR${R} ($DELTA_STR) ${C}│${R} Average: ${Y}$AVG_STR${R}$TASK_IDS_SEGMENT"
-    else
-      echo -e "  ⏱️  Iteration $i: ${Y}$ITERATION_STR${R} ${C}│${R} Average: ${Y}$AVG_STR${R}$TASK_IDS_SEGMENT"
-    fi
-    echo -e "  ⏱️  Total time: ${Y}$ELAPSED_STR${R}"
-    display_session_step_totals
-    exit $EXIT_DECIDE
-  fi
-
-  # Calculate elapsed time
-  ELAPSED=$(($(date +%s) - START_TIME))
-  ELAPSED_STR=$(format_duration $ELAPSED)
-
-  if [ -n "$DELTA_STR" ]; then
-    echo -e "${G}  └── ✓ Iteration $i complete${R}$TASK_IDS_SEGMENT ${C}│${R} Iteration: ${Y}$ITERATION_STR${R} ($DELTA_STR) ${C}│${R} Average: ${Y}$AVG_STR${R} ${C}│${R} Total: ${Y}$ELAPSED_STR${R}"
-  else
-    echo -e "${G}  └── ✓ Iteration $i complete${R}$TASK_IDS_SEGMENT ${C}│${R} Iteration: ${Y}$ITERATION_STR${R} ${C}│${R} Average: ${Y}$AVG_STR${R} ${C}│${R} Total: ${Y}$ELAPSED_STR${R}"
-  fi
-
-  # Display per-iteration step times
-  STEP_TIMES_OUTPUT=$(format_step_times "ITERATION")
-  if [ -n "$STEP_TIMES_OUTPUT" ]; then
-    echo -e "${G}      └──${R} $STEP_TIMES_OUTPUT"
-  fi
-  sleep 2 || true
+  case "$RUN_OUTCOME" in
+    progress)
+      RUNS_USED=$((RUNS_USED + 1))
+      STALLS=0
+      ENV_STREAK=0
+      NOTE=""
+      ;;
+    parked)
+      if [ "$FOUNDATION_WAS_DONE" = 0 ]; then
+        revert_run_passes "$TASK_ID" "$RUN_BEFORE" "$RUN_TAG_KIND" \
+          || stop_loop "cannot commit the passes revert for $TASK_ID" "$EXIT_SETUP_ERROR"
+        stop_for_help "$RUN_TAG_KIND" "$RUN_TAG_TEXT"
+      fi
+      park_run "$TASK_ID" "$RUN_TAG_KIND" "$RUN_TAG_TEXT" "$RUN_BASE" \
+        || stop_loop "cannot park $TASK_ID" "$EXIT_SETUP_ERROR"
+      echo -e "  Parked $TASK_ID on ${Y}$PARKED_BRANCH${R}"
+      RUNS_USED=$((RUNS_USED + 1))
+      ENV_STREAK=0
+      NOTE=""
+      ;;
+    environment)
+      PREFLIGHT_CODE=$(preflight_failure_code)
+      if [ -n "$PREFLIGHT_CODE" ]; then
+        stop_loop "first run could not start: $RUN_DETAIL" "$PREFLIGHT_CODE"
+      fi
+      ENV_STREAK=$((ENV_STREAK + 1))
+      if [ "$ENV_STREAK" = 1 ]; then
+        OUTAGE_START=$RUN_STARTED
+      fi
+      if [ $(( $(date +%s) - OUTAGE_START )) -ge "$MAX_OUTAGE" ]; then
+        stop_loop "gave up after $(format_duration "$MAX_OUTAGE") of environment failures: $RUN_DETAIL" "$EXIT_OUTAGE"
+      fi
+      WAIT_SECONDS=$(env_wait_seconds "$ENV_STREAK")
+      echo -e "  Environment failure, retrying $TASK_ID in ${Y}$(format_duration "$WAIT_SECONDS")${R}"
+      interruptible_sleep "$WAIT_SECONDS"
+      add_env_wait "$WAIT_SECONDS"
+      ;;
+    *)
+      RUNS_USED=$((RUNS_USED + 1))
+      STALLS=$((STALLS + 1))
+      ENV_STREAK=0
+      NOTE=$(previous_run_note "$RUN_OUTCOME" "$RUN_DETAIL")
+      if [ "$STALLS" -ge "$MAX_STALLS" ]; then
+        stop_loop "$STALLS runs in a row without progress" "$EXIT_MAX_STALLS"
+      fi
+      ;;
+  esac
 done
-
-# Calculate final elapsed time
-ELAPSED=$(($(date +%s) - START_TIME))
-ELAPSED_STR=$(format_duration $ELAPSED)
-
-# Calculate final average (if any iterations completed)
-if [ ${#ITERATION_TIMES[@]} -gt 0 ]; then
-  FINAL_AVG=$((TOTAL_ITERATION_TIME / ${#ITERATION_TIMES[@]}))
-  FINAL_AVG_STR=$(format_duration $FINAL_AVG)
-fi
-
-echo ""
-echo -e "${Y}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-echo -e "  ⚠️  ${Y}Ralph reached max iterations${R} (${M}$MAX_ITERATIONS${R})"
-if [ ${#ITERATION_TIMES[@]} -gt 0 ]; then
-  echo -e "  ⏱️  Average iteration time: ${Y}$FINAL_AVG_STR${R}"
-fi
-echo -e "  ⏱️  Total time: ${Y}$ELAPSED_STR${R}"
-display_session_step_totals
-echo -e "  📋 Check progress: ${G}$PROGRESS_FILE${R}"
-echo -e "${Y}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-exit $EXIT_MAX_ITERATIONS

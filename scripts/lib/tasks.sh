@@ -78,6 +78,7 @@ passes_snapshot() {
 # Set every task's passes to its value in snapshot_json, keeping all other fields.
 restore_passes() {
   local snapshot="$1" restored
+  jq -e --argjson snap "$(passes_snapshot)" '. == $snap' <<< "$snapshot" > /dev/null && return 0
   restored=$(jq --argjson snap "$snapshot" \
     'map(.id as $id | if ($snap | has($id)) then .passes = $snap[$id] else . end)' "$TASKS_FILE") || return 1
   printf '%s\n' "$restored" > "$TASKS_FILE"

@@ -119,6 +119,19 @@ class ProgressTests(unittest.TestCase):
                 else:
                     self.assertTrue(tasks_of(project)[1]["passes"])
 
+    def test_revert_without_passes_change_leaves_tasks_file_untouched(self):
+        tmp = tempfile.TemporaryDirectory(dir="/tmp/opencode")
+        self.addCleanup(tmp.cleanup)
+        project = make_project(Path(tmp.name), [T(1)])
+        tasks_file = project / ".agent/tasks.json"
+        tasks_file.write_text('[ {"id": "TASK-1", "passes": false} ]\n')
+        git(project, "commit", "-qam", "hand formatted")
+        head = git(project, "rev-parse", "HEAD")
+        result = bash_in(project, "revert_run_passes TASK-1 \"$(passes_snapshot)\" 'no progress'")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(tasks_file.read_text(), '[ {"id": "TASK-1", "passes": false} ]\n')
+        self.assertEqual(git(project, "rev-parse", "HEAD"), head)
+
     def test_park_snapshots_everything_then_resets_to_base(self):
         tmp = tempfile.TemporaryDirectory(dir="/tmp/opencode")
         self.addCleanup(tmp.cleanup)
