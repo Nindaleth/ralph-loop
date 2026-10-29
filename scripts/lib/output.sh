@@ -7,6 +7,13 @@
 # Handles Agent's stream-json format
 parse_json_content() {
   local json_line="$1"
+  if [ "${RALPH_AGENT:-}" = "opencode" ]; then
+    printf '%s\n' "$json_line" | jq -Rr '
+      fromjson? | select(.type == "text" or .type == "error") |
+      if .type == "text" then .part.text // empty else .error.message // empty end
+    ' 2>/dev/null
+    return
+  fi
   # Try to extract text content from various JSON formats
   # For example, Claude stream-json outputs {"type":"content_block_delta","delta":{"text":"..."}}
   # or {"type":"text","text":"..."} etc.
@@ -109,10 +116,41 @@ strip_ansi_file() {
     > "$output_file"
 }
 
-# Extract final summary from JSON stream output
-# Looks for the result type message which contains the final output
+# Read the last completed assistant response from a matching session export.
+extract_export_summary() {
+  local output_file="$1" session_id="$2" message_id="$3"
+  jq -Rnr --arg session "$session_id" --arg message "$message_id" '
+    [inputs | fromjson? | select(type == "object" and .info.id == $session)] |
+    if length != 1 then error("Missing matching session export") else .[0] end |
+    .messages[-1] |
+    if .id == $message and .type == "assistant" and .finish == "stop" and .error == null and
+       (.time.completed | type) == "number"
+    then [.content[] | select(.type == "text") | .text] | join("\n")
+    else "" end
+  ' "$output_file"
+}
+
+# Extract the final stopped assistant message from the event stream.
 extract_final_summary() {
   local output_file="$1"
+  if [ "${RALPH_AGENT:-}" = "opencode" ]; then
+    jq -Rnr '
+      reduce (inputs | fromjson? | select(type == "object")) as $event
+        ({message: null, text: [], finished: false, failed: false};
+         if $event.type == "error" then .failed = true
+         elif (["step_start", "text", "step_finish"] | index($event.type)) != null
+           and ($event.part.messageID | type) == "string" then
+           (if .message != $event.part.messageID or $event.type == "step_start"
+            then .message = $event.part.messageID | .text = [] | .finished = false
+            else . end) |
+           if $event.type == "text" then .text += [$event.part.text // ""]
+           elif $event.type == "step_finish" then .finished = ($event.part.reason == "stop")
+           else . end
+         else . end) |
+      if .finished and (.failed | not) then .text | join("\n") else "" end
+    ' "$output_file"
+    return
+  fi
   local result_line=""
   local summary=""
 
@@ -161,11 +199,11 @@ display_final_summary() {
       echo "${line:0:$cut_at}"
       line="${line:$cut_at}"
       line="${line# }"  # Remove leading space
-      ((line_count++))
+      ((line_count+=1))
     done
     if [ $line_count -lt $max_lines ] && [ -n "$line" ]; then
       echo "$line"
-      ((line_count++))
+      ((line_count+=1))
     fi
   done <<< "$summary"
 

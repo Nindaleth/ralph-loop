@@ -25,6 +25,7 @@ source "$SCRIPT_DIR/scripts/lib/notify.sh"
 source "$SCRIPT_DIR/scripts/lib/agents.sh"
 source "$SCRIPT_DIR/scripts/lib/display.sh"
 source "$SCRIPT_DIR/scripts/lib/args.sh"
+source "$SCRIPT_DIR/scripts/lib/execution.sh"
 
 # Timing
 START_TIME=$(date +%s)
@@ -62,6 +63,7 @@ fi
 
 # Pre-flight checks
 check_git_repo
+check_agent_dependencies
 check_required_files
 check_history_dir
 check_ansi_support
@@ -84,7 +86,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   # Run Agent with the ralph prompt (prepend PROJECT_ROOT)
   PROMPT_CONTENT="PROJECT_ROOT=$SCRIPT_DIR
 
-$(cat $SCRIPT_DIR/.agent/PROMPT.md)"
+$(cat "$SCRIPT_DIR/.agent/PROMPT.md")"
 
   # Start spinner
   start_spinner
@@ -92,70 +94,7 @@ $(cat $SCRIPT_DIR/.agent/PROMPT.md)"
   # Initialize rolling preview
   init_rolling_preview
 
-  # Run Agent and capture output while updating spinner and preview
-  OUTPUT_FILE=$(mktemp)
-  FULL_OUTPUT_FILE=$(mktemp)
-
-  # Use script to provide pseudo-TTY for sbx.
-  # This is the main command loop.
-  export PROMPT_CONTENT
-  export DOCKER_DEFAULT_PLATFORM=linux/amd64 # Needed for Playwright.
-
-  AGENT_COMMAND=$(build_agent_command "$RALPH_AGENT" "$RALPH_SANDBOX_NAME")
-  script -q "$OUTPUT_FILE" bash -c "$AGENT_COMMAND" >/dev/null 2>&1 &
-  AGENT_PID=$!
-
-  # Track position in output file for incremental reading
-  LAST_POS=0
-
-  # Monitor output and update spinner step and rolling preview
-  while kill -0 "$AGENT_PID" 2>/dev/null; do
-    if [ -f "$OUTPUT_FILE" ]; then
-      # Get current file size
-      CURRENT_SIZE=$(stat -f%z "$OUTPUT_FILE" 2>/dev/null || stat -c%s "$OUTPUT_FILE" 2>/dev/null || echo "0")
-
-      # Read new content if file has grown
-      if [ "$CURRENT_SIZE" -gt "$LAST_POS" ]; then
-        # Read new lines
-        while IFS= read -r line; do
-          if [ -n "$line" ]; then
-            # Parse JSON and extract text content
-            parsed=$(parse_json_content "$line")
-            if [ -n "$parsed" ]; then
-              # Save to full output
-              echo "$parsed" >> "$FULL_OUTPUT_FILE"
-              # Update spinner step
-              update_spinner_step "$parsed"
-              # Update preview line under spinner
-              update_preview_line "$parsed"
-            fi
-          fi
-        done < <(tail -c +$((LAST_POS + 1)) "$OUTPUT_FILE" 2>/dev/null)
-        LAST_POS=$CURRENT_SIZE
-      fi
-    fi
-    sleep 0.2 || true
-  done
-
-  wait "$AGENT_PID" || true
-  AGENT_PID=""  # Clear PID after process exits
-
-  # Process any remaining output
-  if [ -f "$OUTPUT_FILE" ]; then
-    CURRENT_SIZE=$(stat -f%z "$OUTPUT_FILE" 2>/dev/null || stat -c%s "$OUTPUT_FILE" 2>/dev/null || echo "0")
-    if [ "$CURRENT_SIZE" -gt "$LAST_POS" ]; then
-      while IFS= read -r line; do
-        if [ -n "$line" ]; then
-          parsed=$(parse_json_content "$line")
-          if [ -n "$parsed" ]; then
-            echo "$parsed" >> "$FULL_OUTPUT_FILE"
-          fi
-        fi
-      done < <(tail -c +$((LAST_POS + 1)) "$OUTPUT_FILE" 2>/dev/null)
-    fi
-  fi
-
-  OUTPUT=$(cat "$FULL_OUTPUT_FILE" 2>/dev/null || cat "$OUTPUT_FILE")
+  capture_agent_output
 
   # Check for Docker daemon not ready error
   if echo "$OUTPUT" | grep -q "docker daemon not ready"; then
@@ -186,13 +125,9 @@ $(cat $SCRIPT_DIR/.agent/PROMPT.md)"
     exit $EXIT_AUTH_ERROR
   fi
 
-  # Save cleaned output to history file (SESSION_ID prevents overwrites between runs)
-  # Strip ANSI control characters for clean, readable history
-  HISTORY_FILE="$HISTORY_DIR/ITERATION-${SESSION_ID}-${i}.txt"
-  strip_ansi_file "$OUTPUT_FILE" "$HISTORY_FILE"
-
-  # Extract final summary before removing files
-  FINAL_SUMMARY=$(extract_final_summary "$OUTPUT_FILE")
+  if [ "$RALPH_AGENT" = "opencode" ]; then
+    OUTPUT="$FINAL_SUMMARY"
+  fi
 
   rm -f "$FULL_OUTPUT_FILE"
   FULL_OUTPUT_FILE=""  # Clear after removal

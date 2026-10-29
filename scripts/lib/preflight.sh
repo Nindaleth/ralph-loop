@@ -55,3 +55,13 @@ check_required_files() {
     log_warn "Optional file missing: .agent/prd/SUMMARY.md"
   fi
 }
+
+# Check host dependencies for the OpenCode container launcher.
+check_agent_dependencies() {
+  if [ "$RALPH_AGENT" = "opencode" ]; then
+    if ! command -v jq >/dev/null 2>&1 || [ ! -f "$HOME/bin/ocd.sh" ]; then
+      log_error 'OpenCode requires jq and $HOME/bin/ocd.sh'
+      exit 1
+    fi
+  fi
+}

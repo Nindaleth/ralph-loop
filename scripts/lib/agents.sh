@@ -39,15 +39,20 @@ agent_display_name() {
   esac
 }
 
-# Claude's stream-json output is currently the only fully parsed output path.
+# Return success for agents with structured output support.
 agent_uses_stream_json() {
-  [ "$1" = "claude" ]
+  [[ "$1" = "claude" || "$1" = "opencode" ]]
 }
 
 # Authentication command users can run before starting Ralph.
 agent_login_command() {
   local agent="${1:-claude}"
   local sandbox_name="${2:-}"
+
+  if [ "$agent" = "opencode" ]; then
+    printf 'source "%s/bin/ocd.sh"' "$HOME"
+    return
+  fi
 
   if [ -n "$sandbox_name" ]; then
     echo "sbx run --name $sandbox_name $agent ."
@@ -144,7 +149,7 @@ build_agent_command() {
       printf '%s --%s -p "$PROMPT_CONTENT"' "$sbx_run" "$extra_args"
       ;;
     opencode)
-      printf '%s -- run%s "$PROMPT_CONTENT"' "$sbx_run" "$extra_args"
+      printf 'export OCD_QUIET=1 OCD_CIDFILE="$RALPH_CONTAINER_CIDFILE"; source "$HOME/bin/ocd.sh" "$HOME/.opencode/bin/opencodedev" --standalone run --agent ralph-build --yolo --format json%s "$PROMPT_CONTENT"' "$extra_args"
       ;;
     *)
       return 1

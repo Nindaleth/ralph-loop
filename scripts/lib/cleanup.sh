@@ -12,12 +12,30 @@
 # prevents double-stopping the sandbox or removing temp files twice.
 CLEANUP_DONE=0
 
+# Stop only the OpenCode container recorded by this invocation's Docker client.
+stop_agent_container() {
+  local cidfile="${RALPH_CONTAINER_CIDFILE:-}"
+  local container_id=""
+  if [ -n "$cidfile" ]; then
+    if [ -f "$cidfile" ]; then
+      container_id=$(cat "$cidfile")
+      if [[ "$container_id" =~ ^[a-f0-9]{64}$ ]]; then
+        docker container stop --time 5 "$container_id" >/dev/null 2>&1 || true
+      fi
+      rm -f "$cidfile"
+    fi
+    rmdir "$(dirname "$cidfile")" 2>/dev/null || true
+    RALPH_CONTAINER_CIDFILE=""
+  fi
+}
+
 # Cleanup function - kills background processes and removes temp files
 cleanup() {
   if [ "$CLEANUP_DONE" = "1" ]; then
     return 0
   fi
   CLEANUP_DONE=1
+  stop_agent_container
 
   # Kill spinner background process
   if [ -n "$SPINNER_PID" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then
@@ -38,7 +56,7 @@ cleanup() {
   AGENT_PID=""
 
   # Stop only the deterministic sandbox for this Ralph invocation.
-  if [ -n "$RALPH_SANDBOX_NAME" ] && command -v sbx &>/dev/null; then
+  if [ "${RALPH_AGENT:-}" != "opencode" ] && [ -n "$RALPH_SANDBOX_NAME" ] && command -v sbx &>/dev/null; then
     echo -e "  ${Y}📦 Stopping sandbox ${RALPH_SANDBOX_NAME}...${R}"
     sbx stop "$RALPH_SANDBOX_NAME" 2>/dev/null &
     local stop_pid=$!
