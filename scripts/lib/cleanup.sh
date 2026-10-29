@@ -29,6 +29,18 @@ stop_agent_container() {
   fi
 }
 
+# Kill the agent process tree if it is still running.
+# The process tree is: script -> bash -> wrapper or sbx run, and killing
+# only the script PID leaves the child running.
+stop_agent_process() {
+  if [ -n "$AGENT_PID" ] && kill -0 "$AGENT_PID" 2>/dev/null; then
+    pkill -TERM -P "$AGENT_PID" 2>/dev/null || true
+    kill "$AGENT_PID" 2>/dev/null || true
+    wait "$AGENT_PID" 2>/dev/null || true
+  fi
+  AGENT_PID=""
+}
+
 # Cleanup function - kills background processes and removes temp files
 cleanup() {
   if [ "$CLEANUP_DONE" = "1" ]; then
@@ -44,16 +56,7 @@ cleanup() {
   fi
   SPINNER_PID=""
 
-  # Kill Agent process tree if still running
-  # The process tree is: script -> bash -> sbx run
-  # Killing just the script PID leaves the sbx running
-  if [ -n "$AGENT_PID" ] && kill -0 "$AGENT_PID" 2>/dev/null; then
-    # Kill child processes first (bash -> docker), then the script process
-    pkill -TERM -P "$AGENT_PID" 2>/dev/null || true
-    kill "$AGENT_PID" 2>/dev/null || true
-    wait "$AGENT_PID" 2>/dev/null || true
-  fi
-  AGENT_PID=""
+  stop_agent_process
 
   # Stop only the deterministic sandbox for this Ralph invocation.
   if [ "${RALPH_AGENT:-}" != "opencode" ] && [ -n "$RALPH_SANDBOX_NAME" ] && command -v sbx &>/dev/null; then

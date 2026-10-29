@@ -43,21 +43,19 @@ recover_opencode_result() {
   RALPH_CONTAINER_CIDFILE="$(mktemp -d)/container.cid"
   export RALPH_CONTAINER_CIDFILE
   command='export OCD_QUIET=1 OCD_CIDFILE="$RALPH_CONTAINER_CIDFILE"; source "$HOME/bin/ocd.sh" "$HOME/.opencode/bin/opencodedev" --standalone session export "$RALPH_SESSION_ID" | jq -Mc .; codes=("${PIPESTATUS[@]}"); if ((codes[0])); then exit "${codes[0]}"; else exit "${codes[1]}"; fi'
+  local run_status="$AGENT_EXIT_STATUS"
   start_agent_command "$command" "$FULL_OUTPUT_FILE"
   wait_agent_command
-  if [ "$AGENT_EXIT_STATUS" -ne 0 ]; then
-    stop_spinner
-    clear_rolling_preview
-    printf '\nOpenCode result export failed with status %s. Run output: %s\n' \
-      "$AGENT_EXIT_STATUS" "$HISTORY_FILE" >&2
-    tail -n 15 "$FULL_OUTPUT_FILE" | tee -a "$HISTORY_FILE" >&2
-    exit "$AGENT_EXIT_STATUS"
+  RECOVERY_EXIT_STATUS="$AGENT_EXIT_STATUS"
+  AGENT_EXIT_STATUS="$run_status"
+  if [ "$RECOVERY_EXIT_STATUS" -ne 0 ]; then
+    tail -n 15 "$FULL_OUTPUT_FILE" >> "$HISTORY_FILE"
+    RESULT_RECOVERY_FAILED=1
+    return 0
   fi
   if ! FINAL_SUMMARY=$(extract_export_summary "$FULL_OUTPUT_FILE" "$session_id" "$message_id"); then
-    stop_spinner
-    clear_rolling_preview
-    printf '\nCannot verify OpenCode final result. Run output: %s\n' "$HISTORY_FILE" >&2
-    exit 1
+    RECOVERY_EXIT_STATUS=1
+    RESULT_RECOVERY_FAILED=1
   fi
 }
 
@@ -78,8 +76,29 @@ read_agent_output() {
   fi
 }
 
-# Capture one agent invocation and preserve its exit code in AGENT_EXIT_STATUS.
+# Poll the agent until it ends or the deadline passes, running tick_command
+# on every poll. Returns 124 after stopping a run that hit the deadline.
+watch_agent_command() {
+  local deadline="$1" tick_command="${2:-}"
+  while kill -0 "$AGENT_PID" 2>/dev/null; do
+    [ -z "$tick_command" ] || "$tick_command"
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      stop_agent_container
+      stop_agent_process
+      return 124
+    fi
+    sleep 0.2 || true
+  done
+  return 0
+}
+
+# Capture one agent invocation. Sets RUN_TIMED_OUT, AGENT_EXIT_STATUS,
+# FINAL_SUMMARY, RESULT_RECOVERY_FAILED and HISTORY_FILE.
 capture_agent_output() {
+  RUN_TIMED_OUT=0
+  RESULT_RECOVERY_FAILED=0
+  RECOVERY_EXIT_STATUS=0
+  FINAL_SUMMARY=""
   OUTPUT_FILE=$(mktemp)
   FULL_OUTPUT_FILE=$(mktemp)
   if [ "$RALPH_AGENT" = "opencode" ]; then
@@ -93,22 +112,19 @@ capture_agent_output() {
   agent_command=$(build_agent_command "$RALPH_AGENT" "$RALPH_SANDBOX_NAME")
   start_agent_command "$agent_command" "$OUTPUT_FILE"
   LAST_POS=0
-  while kill -0 "$AGENT_PID" 2>/dev/null; do
+  if watch_agent_command $(( $(date +%s) + ITERATION_TIMEOUT )) read_agent_output; then
     read_agent_output
-    sleep 0.2 || true
-  done
-  read_agent_output
-  wait_agent_command
+    wait_agent_command
+  else
+    RUN_TIMED_OUT=1
+    AGENT_EXIT_STATUS=124
+    read_agent_output
+  fi
   OUTPUT=$(cat "$FULL_OUTPUT_FILE")
-  HISTORY_FILE="$HISTORY_DIR/ITERATION-${SESSION_ID}-${i}.txt"
+  HISTORY_FILE="$HISTORY_DIR/ITERATION-${SESSION_ID}-${ATTEMPT}.txt"
   strip_ansi_file "$OUTPUT_FILE" "$HISTORY_FILE"
-  if [ "$AGENT_EXIT_STATUS" -ne 0 ]; then
-    stop_spinner
-    clear_rolling_preview
-    printf '\nAgent exited with status %s. Output saved to %s\n' \
-      "$AGENT_EXIT_STATUS" "$HISTORY_FILE" >&2
-    tail -n 15 "$HISTORY_FILE" >&2
-    exit "$AGENT_EXIT_STATUS"
+  if [ "$AGENT_EXIT_STATUS" -ne 0 ] && [ "$RUN_TIMED_OUT" = 0 ]; then
+    return 0
   fi
   FINAL_SUMMARY=$(extract_final_summary "$OUTPUT_FILE")
   if [ "$RALPH_AGENT" = "opencode" ] && [ -z "$FINAL_SUMMARY" ]; then

@@ -94,7 +94,23 @@ $(cat "$SCRIPT_DIR/.agent/PROMPT.md")"
   # Initialize rolling preview
   init_rolling_preview
 
+  ATTEMPT=$i
   capture_agent_output
+  if [ "$AGENT_EXIT_STATUS" -ne 0 ]; then
+    stop_spinner
+    clear_rolling_preview
+    printf '\nAgent exited with status %s. Output saved to %s\n' \
+      "$AGENT_EXIT_STATUS" "$HISTORY_FILE" >&2
+    tail -n 15 "$HISTORY_FILE" >&2
+    exit "$AGENT_EXIT_STATUS"
+  fi
+  if [ "$RESULT_RECOVERY_FAILED" = 1 ]; then
+    stop_spinner
+    clear_rolling_preview
+    printf '\nCannot recover the OpenCode final result. Run output: %s\n' "$HISTORY_FILE" >&2
+    tail -n 15 "$HISTORY_FILE" >&2
+    exit "$RECOVERY_EXIT_STATUS"
+  fi
 
   # Check for Docker daemon not ready error
   if echo "$OUTPUT" | grep -q "docker daemon not ready"; then
