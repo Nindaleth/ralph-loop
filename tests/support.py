@@ -13,6 +13,11 @@ GIT_ENV = {
 }
 
 
+def event(kind, message="msg_final", **fields):
+    return json.dumps({"type": kind, "timestamp": 1, "sessionID": "ses_test",
+                       "part": {"messageID": message, **fields}})
+
+
 def git(project, *args):
     return subprocess.run(["git", *args], cwd=project, text=True, check=True,
                           capture_output=True, env={**os.environ, **GIT_ENV}).stdout

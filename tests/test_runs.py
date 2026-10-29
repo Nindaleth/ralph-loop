@@ -1,10 +1,11 @@
+import json
 import os
 from pathlib import Path
 import tempfile
 import time
 import unittest
 
-from tests.support import bash_in, make_project
+from tests.support import bash_in, event, make_project
 
 
 CID = "a" * 64
@@ -42,6 +43,51 @@ class RunDeadlineTests(unittest.TestCase):
         self.assertEqual(timed_out, "1")
         self.assertNotEqual(status, "0")
         self.assertIn(f"container stop --time 5 {CID}", self.calls.read_text())
+
+    def test_environment_failure_detection(self):
+        def err(message):
+            return json.dumps({"type": "error", "error": {
+                "name": "APIError", "data": {"message": message}}})
+        started = event("step_start")
+        budget = ("Your organization or enterprise has exceeded its Copilot budget. "
+                  "Contact your admin to resume usage.")
+        cases = [
+            ([started, err(budget)], "1", "0", True, "Copilot budget"),
+            ([started, err("429 Too Many Requests")], "1", "0", True, "429"),
+            ([started, err("TypeError: x is undefined")], "1", "0", False, ""),
+            (["docker: Error response from daemon: oops"], "125", "0", True,
+             "docker: Error response from daemon: oops"),
+            ([started, event("text", text="the network test failed")], "1", "0", False, ""),
+        ]
+        history = self.base / "history"
+        for lines, status, recovery, expected, detail in cases:
+            with self.subTest(lines=lines):
+                history.write_text("\n".join(lines) + "\n")
+                result = bash_in(self.project,
+                                 f'if is_environment_failure "{history}" {status} {recovery}; '
+                                 'then echo "yes:$ENV_FAILURE_DETAIL"; else echo no; fi')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if expected:
+                    self.assertTrue(result.stdout.startswith("yes:"), result.stdout)
+                    self.assertIn(detail, result.stdout)
+                else:
+                    self.assertEqual(result.stdout.strip(), "no")
+
+    def test_first_matching_outcome_wins(self):
+        cases = [
+            (("1", "BLOCKED", "1", "1", "7"), "progress"),
+            (("0", "DECIDE", "1", "1", "7"), "parked"),
+            (("0", "RETRY", "0", "1", "0"), "environment"),
+            (("0", "", "0", "1", "0"), "timeout"),
+            (("0", "", "0", "0", "7"), "failure"),
+            (("0", "", "0", "0", "0"), "no_progress"),
+        ]
+        for args, expected in cases:
+            with self.subTest(args=args):
+                quoted = " ".join(f'"{a}"' for a in args)
+                result = bash_in(self.project, f"classify_run {quoted}")
+                self.assertEqual((result.returncode, result.stdout.strip()),
+                                 (0, expected), result.stderr)
 
 
 if __name__ == "__main__":

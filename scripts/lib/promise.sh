@@ -12,6 +12,7 @@
 #   <promise>COMPLETE</promise>     - All tasks finished successfully
 #   <promise>BLOCKED:reason</promise>  - Agent is blocked and needs human help
 #   <promise>DECIDE:question</promise> - Agent needs human decision/clarification
+#   <promise>RETRY:reason</promise>    - Transient environment trouble, run again later
 #   <promise>TASK-1:DONE</promise> - Task completed during this iteration
 #
 # Examples:
@@ -24,6 +25,7 @@
 PROMISE_COMPLETE_PATTERN='<promise>COMPLETE</promise>'
 PROMISE_BLOCKED_PATTERN='<promise>BLOCKED:[^<]*</promise>'
 PROMISE_DECIDE_PATTERN='<promise>DECIDE:[^<]*</promise>'
+PROMISE_RETRY_PATTERN='<promise>RETRY:[^<]*</promise>'
 PROMISE_TASK_DONE_PATTERN='<promise>TASK-[A-Za-z0-9._-]+:DONE</promise>'
 
 # Check if output contains a COMPLETE tag
@@ -47,6 +49,13 @@ has_decide_tag() {
   echo "$output" | grep -qE "$PROMISE_DECIDE_PATTERN"
 }
 
+# Check if output contains a RETRY tag
+# Usage: if has_retry_tag "$output"; then ...
+has_retry_tag() {
+  local output="$1"
+  echo "$output" | grep -qE "$PROMISE_RETRY_PATTERN"
+}
+
 # Extract the reason from a BLOCKED tag
 # Usage: reason=$(extract_blocked_reason "$output")
 # Returns: the reason string, or empty if no tag found
@@ -68,6 +77,17 @@ extract_decide_question() {
   if [ -n "$match" ]; then
     # Extract content between DECIDE: and </promise>
     echo "$match" | sed 's/<promise>DECIDE://;s/<\/promise>//'
+  fi
+}
+
+# Extract the reason from a RETRY tag
+# Usage: reason=$(extract_retry_reason "$output")
+# Returns: the reason string, or empty if no tag found
+extract_retry_reason() {
+  local output="$1"
+  local match=$(echo "$output" | grep -oE "$PROMISE_RETRY_PATTERN" | head -1)
+  if [ -n "$match" ]; then
+    echo "$match" | sed 's/<promise>RETRY://;s/<\/promise>//'
   fi
 }
 

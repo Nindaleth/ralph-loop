@@ -6,13 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def event(kind, message="msg_final", **fields):
-    return json.dumps({"type": kind, "timestamp": 1, "sessionID": "ses_test",
-                       "part": {"messageID": message, **fields}})
+from tests.support import ROOT, event
 
 
 class OpenCodeTests(unittest.TestCase):
