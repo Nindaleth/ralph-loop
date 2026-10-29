@@ -119,6 +119,45 @@ class ProgressTests(unittest.TestCase):
                 else:
                     self.assertTrue(tasks_of(project)[1]["passes"])
 
+    def test_park_snapshots_everything_then_resets_to_base(self):
+        tmp = tempfile.TemporaryDirectory(dir="/tmp/opencode")
+        self.addCleanup(tmp.cleanup)
+        project = make_project(Path(tmp.name), [{"id": "TASK-1", "passes": True},
+                                                {"id": "TASK-2", "passes": False}])
+        (project / ".gitignore").write_text("node_modules/\n")
+        (project / "b.txt").write_text("original\n")
+        git(project, "add", "-A")
+        git(project, "commit", "-q", "-m", "base files")
+        base = git(project, "rev-parse", "HEAD").strip()
+        (project / "a.txt").write_text("committed\n")
+        git(project, "add", "a.txt")
+        git(project, "commit", "-q", "-m", "feat: partial work")
+        (project / "b.txt").write_text("modified\n")
+        (project / "c.txt").write_text("untracked\n")
+        (project / "node_modules").mkdir()
+        (project / "node_modules/x").write_text("ignored\n")
+        git(project, "branch", "ralph/parked/TASK-2")
+        reason = 'Use "A" or B?\nback\\slash'
+
+        result = bash_in(project, 'park_run TASK-2 DECIDE "$REASON" "$BASE" && echo "$PARKED_BRANCH"',
+                         {"REASON": reason, "BASE": base})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        branch = "ralph/parked/TASK-2-2"
+        self.assertEqual(result.stdout.strip(), branch)
+        for name, content in [("a.txt", "committed\n"), ("b.txt", "modified\n"),
+                              ("c.txt", "untracked\n")]:
+            self.assertEqual(git(project, "show", f"{branch}:{name}"), content)
+        self.assertEqual(len(git(project, "rev-list", f"{base}..{branch}").split()), 2)
+        self.assertEqual(git(project, "rev-parse", "HEAD~1").strip(), base)
+        self.assertFalse((project / "a.txt").exists())
+        self.assertFalse((project / "c.txt").exists())
+        self.assertEqual((project / "b.txt").read_text(), "original\n")
+        self.assertTrue((project / "node_modules/x").exists())
+        self.assertEqual(tasks_of(project)[1]["parked"],
+                         {"kind": "DECIDE", "reason": reason, "branch": branch, "base": base})
+        self.assertEqual(git(project, "status", "--porcelain"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

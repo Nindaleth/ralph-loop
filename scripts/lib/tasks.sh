@@ -89,3 +89,13 @@ commit_bookkeeping() {
   git diff --quiet HEAD -- "$TASKS_FILE" && return 0
   git commit -q -m "$message" -- "$TASKS_FILE"
 }
+
+# Record why and where a task was parked.
+# Usage: set_task_parked <task_id> <kind> <reason> <branch> <base_sha>
+set_task_parked() {
+  local updated
+  updated=$(jq --arg id "$1" --arg kind "$2" --arg reason "$3" --arg branch "$4" --arg base "$5" \
+    'map(if .id == $id then .parked = {kind: $kind, reason: $reason, branch: $branch, base: $base}
+         else . end)' "$TASKS_FILE") || return 1
+  printf '%s\n' "$updated" > "$TASKS_FILE"
+}
