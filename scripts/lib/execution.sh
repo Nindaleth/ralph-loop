@@ -5,9 +5,9 @@ start_agent_command() {
   local agent_command="$1" output_file="$2"
   if [ "$(uname -s)" = "Linux" ]; then
     export RALPH_AGENT_COMMAND="$agent_command"
-    script -q -e -c 'bash -c "$RALPH_AGENT_COMMAND"' "$output_file" >/dev/null 2>&1 &
+    script -q -e -c 'bash -c "$RALPH_AGENT_COMMAND"' "$output_file" >/dev/null 2>>"$output_file" &
   else
-    script -q -e "$output_file" bash -c "$agent_command" >/dev/null 2>&1 &
+    script -q -e "$output_file" bash -c "$agent_command" >/dev/null 2>>"$output_file" &
   fi
   AGENT_PID=$!
 }

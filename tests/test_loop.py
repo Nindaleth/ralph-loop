@@ -172,6 +172,28 @@ class LoopTests(unittest.TestCase):
                                 text=True, timeout=60)
         self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
 
+    def test_missing_host_tool_stops_before_the_first_run(self):
+        for tool in ("script", "jq"):
+            with self.subTest(tool=tool):
+                scripts, env, argv = self.scripted_ralph(
+                    self.project, ["finish TASK-1"], "--max-outage", "2s")
+                trimmed = self.base / f"no-{tool}-bin"
+                trimmed.mkdir()
+                for directory in os.environ["PATH"].split(os.pathsep):
+                    if not os.path.isdir(directory):
+                        continue
+                    for entry in Path(directory).iterdir():
+                        target = trimmed / entry.name
+                        if entry.name != tool and not os.path.lexists(target):
+                            target.symlink_to(entry)
+                env["PATH"] = f"{self.base / 'bin'}:{trimmed}"
+                result = subprocess.run(argv, cwd=self.project, env=env, capture_output=True,
+                                        text=True, timeout=60)
+                self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+                self.assertIn(f"dnf provides /usr/bin/{tool}", result.stdout + result.stderr)
+                self.assertEqual(
+                    list((self.project / ".agent/history").glob("ITERATION-*")), [])
+
     def test_sigterm_during_environment_wait_exits_promptly(self):
         started = self.base / "started"
         scripts, env, argv = self.scripted_ralph(

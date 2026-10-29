@@ -56,12 +56,17 @@ check_required_files() {
   fi
 }
 
-# Check host dependencies for the OpenCode container launcher.
+# Check host dependencies for the agent launcher.
 check_agent_dependencies() {
-  if [ "$RALPH_AGENT" = "opencode" ]; then
-    if ! command -v jq >/dev/null 2>&1 || [ ! -f "$HOME/bin/ocd.sh" ]; then
-      log_error 'OpenCode requires jq and $HOME/bin/ocd.sh'
-      exit 1
+  local tool
+  for tool in script jq; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      log_error "Ralph needs the $tool command (dnf provides /usr/bin/$tool)"
+      exit "$EXIT_DOCKER_ERROR"
     fi
+  done
+  if [ "$RALPH_AGENT" = "opencode" ] && [ ! -f "$HOME/bin/ocd.sh" ]; then
+    log_error 'OpenCode requires $HOME/bin/ocd.sh'
+    exit 1
   fi
 }

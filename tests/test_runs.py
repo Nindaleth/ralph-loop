@@ -35,6 +35,20 @@ class RunDeadlineTests(unittest.TestCase):
         self.assertNotEqual(status, "0")
         self.assertIn(f"container stop --time 5 {CID}", self.calls.read_text())
 
+    def test_launcher_error_reaches_the_failure_detail(self):
+        launcher = self.base / "bin/script"
+        launcher.write_text('#!/bin/sh\necho "script: failed to create pseudo-terminal" >&2\nexit 1\n')
+        launcher.chmod(0o755)
+        result = bash_in(self.project,
+                         'ATTEMPT=1 ITERATION_TIMEOUT=30 RALPH_AGENT=opencode '
+                         'SESSION_ID=t HISTORY_DIR=.agent/history '
+                         'STEP_FILE=$(mktemp) PROMPT_CONTENT=x; '
+                         'capture_agent_output; '
+                         'is_environment_failure "$HISTORY_FILE" "$AGENT_EXIT_STATUS" '
+                         '"$RESULT_RECOVERY_FAILED"; echo "detail=$ENV_FAILURE_DETAIL;"', self.env)
+        self.assertIn("detail=script: failed to create pseudo-terminal;", result.stdout,
+                      result.stderr)
+
     def test_check_result_classes(self):
         (self.base / "bin/ocd.sh").write_text(
             'if [ -n "$CHECK_NO_START" ]; then echo "docker: daemon down"; return 125; fi\n'

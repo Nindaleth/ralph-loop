@@ -334,7 +334,7 @@ Ralph reads these tags from the builder's final message:
 | 1    | Used all runs |
 | 2    | BLOCKED on a foundation task |
 | 3    | DECIDE on a foundation task |
-| 4    | Docker not ready on the first run |
+| 4    | Docker not ready on the first run, or `script`/`jq` missing |
 | 5    | Invalid API key on the first run |
 | 6    | Too many runs in a row without progress |
 | 7    | Gave up on a long environment outage |
