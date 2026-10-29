@@ -30,6 +30,8 @@ class WrapperTests(unittest.TestCase):
             docker.write_text(
                 '#!/usr/bin/env python3\nimport json, os, pathlib, sys\n'
                 'args = sys.argv[1:]\n'
+                'if args[:2] == ["image", "inspect"]:\n'
+                ' sys.exit(0 if os.environ.get("IMAGE_EXISTS") else 1)\n'
                 'if args[0] == "build":\n'
                 ' print("simulated build failure", file=sys.stderr)\n'
                 ' sys.exit(7)\n'
@@ -60,12 +62,16 @@ class WrapperTests(unittest.TestCase):
                                      capture_output=True, timeout=20)
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("refusing", refused.stderr)
-            (cache / "ocd_alias_md5").write_text("force rebuild")
-            failed = subprocess.run(["bash", "-c", 'source "$WRAPPER" upstream'],
-                                    cwd=repo, env=env, text=True,
-                                    capture_output=True, timeout=20)
-            self.assertEqual(failed.returncode, 7)
-            self.assertIn("simulated build failure", failed.stderr)
+            # A failed rebuild falls back to an existing image and retries next time.
+            for image_exists, code in ((False, 7), (True, 0)):
+                (cache / "ocd_alias_md5").write_text("force rebuild")
+                failed = subprocess.run(["bash", "-c", 'source "$WRAPPER" upstream'],
+                                        cwd=repo, env={**env, "IMAGE_EXISTS": "1" if image_exists else ""},
+                                        text=True, capture_output=True, timeout=20)
+                self.assertEqual(failed.returncode, code, failed.stderr)
+                self.assertIn("simulated build failure", failed.stderr)
+                self.assertEqual((cache / "ocd_alias_md5").read_text(), "force rebuild")
+                self.assertEqual("MODEL_OUTPUT" in failed.stdout, image_exists)
 
 
 if __name__ == "__main__":
