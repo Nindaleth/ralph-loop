@@ -36,6 +36,7 @@ This is an implementation that actually works, containing a hackable script so y
   - [Playwright configuration](#playwright-configuration)
   - [Vitest configuration](#vitest-configuration)
   - [Running with a different agentic CLI](#running-with-a-different-agentic-cli)
+  - [OpenCode wrapper and manual project setup](#opencode-wrapper-and-manual-project-setup)
   - [Starting from scratch](#starting-from-scratch)
 - [Debugging](#debugging)
   - [How to inspect the sandbox and debug](#how-to-inspect-the-sandbox-and-debug)
@@ -276,7 +277,7 @@ The agent will check this file each iteration and if it finds any critical work,
 
 The `ralph.sh` script is designed to be hackable.
 It is configured to use Claude Code in Docker Sandboxes by default, and you can select another supported agent with `--agent`.
-Each run uses a deterministic sandbox name in the form `ralph-<agent>-<current-dir>-<hash8>`, so different agents get separate sandboxes for the same project. On exit or double Ctrl+C, Ralph stops only the named sandbox for the current invocation.
+Other than OpenCode, each run uses a deterministic sandbox name in the form `ralph-<agent>-<current-dir>-<hash8>`, so different agents get separate sandboxes for the same project. On exit or double Ctrl+C, Ralph stops only the named sandbox for the current invocation. OpenCode uses the personal Docker wrapper described below and records its actual container ID for cleanup.
 
 > NB: skills are supported by all major agentic AI CLIs via symlinks.
 
@@ -475,7 +476,7 @@ vi.mock('next/link', () => ({
 
 ### Running with a different agentic CLI
 
-Ralph can run several Docker Sandboxes agents without editing the script:
+Ralph can run several agents without editing the script. OpenCode uses `~/bin/ocd.sh`; the others use Docker Sandboxes:
 
 ```bash
 ./ralph.sh --agent claude    # default
@@ -495,7 +496,79 @@ You can also pass agent-specific options after Ralph's `--` separator:
 
 Ralph currently supports: `claude`, `codex`, `copilot`, `cursor`, `gemini`, and `opencode`.
 See Docker's full list of supported agentic AI CLIs in [Docker's docs](https://docs.docker.com/ai/sandboxes/agents/).
-Because the agent name is part of Ralph's sandbox name, switching agents creates or reuses that agent's own sandbox for the project.
+For Docker Sandboxes agents, the agent name is part of Ralph's sandbox name, so switching agents creates or reuses that agent's own sandbox for the project.
+
+### OpenCode wrapper and manual project setup
+
+This checkout's OpenCode backend sources `~/bin/ocd.sh` with:
+
+```bash
+~/.opencode/bin/opencodedev --standalone run --agent ralph-build --yolo --format json
+```
+
+Each iteration starts a fresh session and a private service in its container.
+The host needs Bash, `script`, `jq`, Docker, and the wrapper; OpenCode needs
+working provider authentication and the globally deployed `ralph-build` agent.
+`--yolo` approves permission requests, not explicit denies. Other backends still
+default to Docker Sandboxes, and the default backend is still Claude.
+
+Ralph sets `OCD_QUIET=1` to hide wrapper chatter, including prompt echoes, while
+keeping errors visible. `OCD_CIDFILE` records the container to stop on exit.
+Only a successfully finished final assistant message supplies OpenCode promise
+tags. Tool output, reasoning, prompt echoes, and failed processes cannot finish
+the loop. If the CLI emits text without a terminal event, Ralph starts a second
+short-lived container to export that session, without running a model. It uses
+only a completed, stopped final assistant response matching the observed session
+and message. Export failures stop the loop rather than guess at completion.
+Raw iteration output, including failures, is kept in `.agent/history/`.
+
+**Copy into the target repository root, not just anywhere on PATH:**
+
+```text
+ralph.sh
+scripts/lib/                 # the complete directory, including execution.sh
+.agent/PROMPT.md             # copy as a template, then tailor it
+.agent/STEERING.md           # optional instructions read by the stock prompt
+```
+
+Create `.agent/logs/`, `.agent/prd/`, `.agent/tasks/`, and, for UI work,
+`.agent/screenshots/`. Set the prompt's actual setup, test, lint, and build
+commands; remove the stock npm/TypeScript assumptions when inappropriate.
+Include one task per invocation, commit identity/trailer rules, and the promise
+protocol. Supply `.agent/STRUCTURE.md` if the prompt tells the builder to read it.
+Merge deliberately if these paths already exist; do not overwrite project work.
+
+**Generated in the target project, not copied from this checkout:**
+
+- Run `/ralph-spec` there. The globally installed `ralph-interview` skill writes
+  `.agent/prd/REQUIREMENTS.md` and asks for approval.
+- Approve the handoff to the globally installed `prd-creator`. It creates
+  `.agent/prd/PRD.md`, `.agent/prd/SUMMARY.md`, `.agent/tasks.json`, and detailed
+  `.agent/tasks/TASK-*.json` files. Review these before running the builder.
+- Resolve all human decisions and prerequisite access checks before looping.
+  In particular, `TASK-1` must be executable without asking questions.
+- The skill may create `.env.local` placeholders; fill real values yourself
+  and Git-ignore secrets, history logs, and unwanted screenshots.
+- Ralph creates `.agent/logs/LOG.md` if absent and `.agent/history/` with each
+  iteration's output. The builder updates task status and the progress log.
+
+The four global agent/command/interview files and the complete global
+`prd-creator/` directory do not need copying into each project. Project-specific
+skills under `.agent/skills/` are not automatically discovered by OpenCode; use
+a supported skill directory or configure that source if you need them.
+
+Run the first iteration under supervision from the target repository:
+
+```bash
+./ralph.sh --agent opencode --once
+```
+
+Copying `ralph.sh` alone is not enough. It changes directory to its own location;
+calling this checkout's script from another project still operates on this
+checkout. An empty `tasks.json` is not a prepared project. Timeouts, stall
+detection, and independent acceptance/integration checks are not implemented;
+this integration is not yet a watchdog for long unattended runs. The wrapper's
+writable mounts also include other repositories, not just the target project.
 
 ### Starting from scratch
 
