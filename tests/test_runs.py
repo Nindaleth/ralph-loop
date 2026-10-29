@@ -44,6 +44,30 @@ class RunDeadlineTests(unittest.TestCase):
         self.assertNotEqual(status, "0")
         self.assertIn(f"container stop --time 5 {CID}", self.calls.read_text())
 
+    def test_check_result_classes(self):
+        (self.base / "bin/ocd.sh").write_text(
+            'if [ -n "$CHECK_NO_START" ]; then echo "docker: daemon down"; return 125; fi\n'
+            f'printf %s {CID} > "$OCD_CIDFILE"\n'
+            'exec "$@"\n')
+        cases = [
+            ("true && exit 0", {}, 0),
+            ("true && exit 3", {}, 1),
+            ("sleep 60", {}, 1),
+            ("true", {"CHECK_NO_START": "1"}, 2),
+        ]
+        check_file = self.project / ".agent/check.json"
+        for command, extra, expected in cases:
+            with self.subTest(command=command, extra=extra):
+                self.calls.write_text("")
+                check_file.write_text(json.dumps({"command": command, "enabled_by": "TASK-1"}))
+                result = bash_in(self.project,
+                                 'ATTEMPT=1 CHECK_TIMEOUT=1 SESSION_ID=t; '
+                                 'run_project_check; echo "rc=$?; $CHECK_DETAIL"',
+                                 {**self.env, **extra})
+                self.assertIn(f"rc={expected};", result.stdout, result.stderr)
+                if command == "sleep 60":
+                    self.assertIn("container stop", self.calls.read_text())
+
     def test_environment_failure_detection(self):
         def err(message):
             return json.dumps({"type": "error", "error": {
