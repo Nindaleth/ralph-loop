@@ -8,7 +8,7 @@ import tempfile
 import time
 import unittest
 
-from tests.support import CID, GIT_ENV, event, git, install_fakes, make_project
+from tests.support import CID, GIT_ENV, event, git, install_fakes, make_project, tasks_of
 
 BUDGET = json.dumps({"type": "error", "timestamp": 1, "sessionID": "ses_test", "error": {
     "name": "APIError", "data": {"message": "Your organization or enterprise has "
@@ -25,6 +25,11 @@ script="$SCRIPTS/call-$n.sh"
 bash "$script"
 return $?
 '''
+
+QUESTION = 'Use A < B?\nOr "C" \\ D?'
+
+# Rejects commits that touch nothing but the tasks file.
+TASKS_ONLY_HOOK = "#!/bin/sh\ngit diff --cached --name-only | grep -qvx .agent/tasks.json\n"
 
 
 def said(text):
@@ -46,7 +51,10 @@ def call(action):
         if "exit" in words:
             status = int(words[-1])
     elif words[0] == "decide":
-        text = "<promise>DECIDE:Use A or B?</promise>"
+        text = f"<promise>DECIDE:{QUESTION}</promise>"
+    elif words[0] == "break":
+        body.append("printf '[{' > .agent/tasks.json && git commit -qam 'oops'")
+        text = "Nothing to do."
     elif words[0] == "budget_error":
         body.append('touch "${STARTED:-/dev/null}"')
         if len(words) > 1:
@@ -72,7 +80,7 @@ class LoopTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.base = Path(tmp.name)
         self.project = make_project(self.base, [{"id": "TASK-1", "passes": False}])
-        self.env = {**os.environ, "TERM": "dumb", **install_fakes(self.base)}
+        self.env = {**os.environ, "TERM": "dumb", **GIT_ENV, **install_fakes(self.base)}
         self.calls = Path(self.env["CALLS"])
 
     def wait_for(self, path, limit=20):
@@ -130,12 +138,20 @@ class LoopTests(unittest.TestCase):
              ["decide", "finish TASK-4"], [], 8, ["TASK-2", "TASK-4"]),
             # a missing docker binary is never transient
             ("docker missing on the first run", [T(1)], ["no_docker"], [], 4, ["TASK-1"]),
+            ("builder commits a broken tasks file", [T(1)], ["break", "finish TASK-1"],
+             ["-n", "2"], 0, ["TASK-1", "TASK-1"]),
+            ("hook rejects bookkeeping commits", [T(1, True), T(2)], ["decide"], [], 8,
+             ["TASK-2"]),
         ]
         for name, tasks, calls, args, code, prompted in cases:
             with self.subTest(name):
                 base = self.base / name.replace(" ", "-")
                 base.mkdir()
                 project = make_project(base, tasks)
+                if name == "hook rejects bookkeeping commits":
+                    hook = project / ".git/hooks/pre-commit"
+                    hook.write_text(TASKS_ONLY_HOOK)
+                    hook.chmod(0o755)
                 scripts, env, argv = self.scripted_ralph(project, calls, *args)
                 result = subprocess.run(argv, cwd=project, env=env, capture_output=True,
                                         text=True, timeout=60)
@@ -147,6 +163,7 @@ class LoopTests(unittest.TestCase):
                     self.assertRegex((scripts / f"prompt-{n}").read_text(), rf"Do {task}\b")
                 if name == "park and route around":
                     git(project, "rev-parse", "--verify", "ralph/parked/TASK-2")
+                    self.assertEqual(tasks_of(project)[1]["parked"]["reason"], QUESTION)
 
     def test_outage_gives_up_after_max_outage(self):
         scripts, env, argv = self.scripted_ralph(

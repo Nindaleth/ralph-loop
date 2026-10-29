@@ -80,6 +80,7 @@ show_ralph
 echo -e " ${C}Starting Ralph${R} ・ ${Y}v$VERSION${R} ・ Agent: ${Y}$RALPH_AGENT_NAME${R} ・ Sandbox: ${Y}$RALPH_SANDBOX_NAME${R} ・ Max iterations: ${Y}$MAX_ITERATIONS${R}"
 echo ""
 git rev-parse -q --verify HEAD >/dev/null || stop_loop "the repository has no commits yet" "$EXIT_SETUP_ERROR"
+git var GIT_COMMITTER_IDENT >/dev/null || stop_loop "git has no committer identity, set user.name and user.email" "$EXIT_SETUP_ERROR"
 validate_tasks || stop_loop "invalid tasks.json" "$EXIT_SETUP_ERROR"
 
 RUNS_USED=0
@@ -90,7 +91,7 @@ ATTEMPT=0
 NOTE=""
 
 while true; do
-  TASK_ID=$(next_task_id)
+  TASK_ID=$(next_task_id) || stop_loop "cannot read .agent/tasks.json" "$EXIT_SETUP_ERROR"
   if [ -z "$TASK_ID" ]; then
     if [ "$(remaining_task_count)" = 0 ]; then
       stop_loop "all tasks complete" "$EXIT_COMPLETE"

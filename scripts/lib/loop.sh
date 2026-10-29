@@ -107,6 +107,9 @@ run_attempt() {
   FULL_OUTPUT_FILE=""
 
   read_run_tag
+  if ! jq empty "$TASKS_FILE" 2> /dev/null; then
+    git show "$RUN_BASE:$TASKS_FILE" > "$TASKS_FILE"
+  fi
   if is_environment_failure "$HISTORY_FILE" "$AGENT_EXIT_STATUS" "$RESULT_RECOVERY_FAILED"; then
     env_failure=1
   fi

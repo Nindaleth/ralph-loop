@@ -23,9 +23,6 @@
 
 # Regex patterns for promise tags
 PROMISE_COMPLETE_PATTERN='<promise>COMPLETE</promise>'
-PROMISE_BLOCKED_PATTERN='<promise>BLOCKED:[^<]*</promise>'
-PROMISE_DECIDE_PATTERN='<promise>DECIDE:[^<]*</promise>'
-PROMISE_RETRY_PATTERN='<promise>RETRY:[^<]*</promise>'
 PROMISE_TASK_DONE_PATTERN='<promise>TASK-[A-Za-z0-9._-]+:DONE</promise>'
 
 # Check if output contains a COMPLETE tag
@@ -35,60 +32,45 @@ has_complete_tag() {
   echo "$output" | grep -q "$PROMISE_COMPLETE_PATTERN"
 }
 
-# Check if output contains a BLOCKED tag
+# Print the text of the first <promise>KIND:...</promise> tag in output.
+# The text may span lines and contain "<". Returns 1 when there is no such tag.
+# Usage: promise_text <BLOCKED|DECIDE|RETRY> "$output"
+promise_text() {
+  local open="<promise>$1:" rest
+  [[ "$2" == *"$open"* ]] || return 1
+  rest=${2#*"$open"}
+  [[ "$rest" == *"</promise>"* ]] || return 1
+  printf '%s\n' "${rest%%"</promise>"*}"
+}
+
 # Usage: if has_blocked_tag "$output"; then ...
 has_blocked_tag() {
-  local output="$1"
-  echo "$output" | grep -qE "$PROMISE_BLOCKED_PATTERN"
+  promise_text BLOCKED "$1" > /dev/null
 }
 
-# Check if output contains a DECIDE tag
 # Usage: if has_decide_tag "$output"; then ...
 has_decide_tag() {
-  local output="$1"
-  echo "$output" | grep -qE "$PROMISE_DECIDE_PATTERN"
+  promise_text DECIDE "$1" > /dev/null
 }
 
-# Check if output contains a RETRY tag
 # Usage: if has_retry_tag "$output"; then ...
 has_retry_tag() {
-  local output="$1"
-  echo "$output" | grep -qE "$PROMISE_RETRY_PATTERN"
+  promise_text RETRY "$1" > /dev/null
 }
 
-# Extract the reason from a BLOCKED tag
 # Usage: reason=$(extract_blocked_reason "$output")
-# Returns: the reason string, or empty if no tag found
 extract_blocked_reason() {
-  local output="$1"
-  local match=$(echo "$output" | grep -oE "$PROMISE_BLOCKED_PATTERN" | head -1)
-  if [ -n "$match" ]; then
-    # Extract content between BLOCKED: and </promise>
-    echo "$match" | sed 's/<promise>BLOCKED://;s/<\/promise>//'
-  fi
+  promise_text BLOCKED "$1" || true
 }
 
-# Extract the question from a DECIDE tag
 # Usage: question=$(extract_decide_question "$output")
-# Returns: the question string, or empty if no tag found
 extract_decide_question() {
-  local output="$1"
-  local match=$(echo "$output" | grep -oE "$PROMISE_DECIDE_PATTERN" | head -1)
-  if [ -n "$match" ]; then
-    # Extract content between DECIDE: and </promise>
-    echo "$match" | sed 's/<promise>DECIDE://;s/<\/promise>//'
-  fi
+  promise_text DECIDE "$1" || true
 }
 
-# Extract the reason from a RETRY tag
 # Usage: reason=$(extract_retry_reason "$output")
-# Returns: the reason string, or empty if no tag found
 extract_retry_reason() {
-  local output="$1"
-  local match=$(echo "$output" | grep -oE "$PROMISE_RETRY_PATTERN" | head -1)
-  if [ -n "$match" ]; then
-    echo "$match" | sed 's/<promise>RETRY://;s/<\/promise>//'
-  fi
+  promise_text RETRY "$1" || true
 }
 
 # Extract completed task IDs from TASK-DONE tags
