@@ -225,12 +225,49 @@ If you'd like to use a different language, testing framework etc. please adjust 
 
 ## How It Works
 
-Each iteration, Ralph will:
-1. Find the highest-priority incomplete task from `.agent/tasks.json`
-2. Work through the task steps defined in `.agent/tasks/TASK-{ID}.json`
-3. Run tests, linting, and type checking
-4. Complete task, take screenshot, update task status and commit changes
-5. Repeat until all tasks pass or max iterations reached
+Each run, Ralph will:
+1. Pick the next task itself: the first task in `.agent/tasks.json` array order that doesn't pass, isn't parked, and has all its `dependencies` done (`priority` doesn't select work)
+2. Hand that one task to a fresh builder, which works through `.agent/tasks/TASK-{ID}.json`
+3. Let the builder run tests, linting and type checking, take screenshots, set `passes: true` and commit
+4. Check the result itself: the task flipped to `passes: true`, no other task's `passes` changed, a new commit exists, and the project check passes (see below)
+5. Repeat until all tasks pass, or one of the stop conditions below hits
+
+### Running overnight
+
+Ralph is built to be left alone. Options:
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `-n`, `--max-iterations` | 10 | Runs that count against the budget |
+| `--max-stalls` | 3 | Stop after this many runs in a row without progress |
+| `--iteration-timeout` | 30m | Stop a run's container after this long |
+| `--max-outage` | 3h | Give up after this long of continuous environment failures |
+| `--check-timeout` | 10m | Time limit for the project check |
+
+Durations accept `90`, `90s`, `30m` or `3h`.
+
+What each run counts as:
+
+| Outcome | Uses a run | Stall counter |
+| ------- | ---------- | ------------- |
+| progress (task flipped, committed, check green) | yes | reset |
+| parked (BLOCKED or DECIDE) | yes | unchanged |
+| environment (provider outage, Copilot budget, auth, Docker, or a `RETRY` tag) | no | unchanged |
+| timeout, nonzero exit, or no progress | yes | +1 |
+
+Environment failures rerun the same task after 1, 2, 4, 8, then every 15 minutes. When a run doesn't count, Ralph puts `passes` back the way it was and keeps the builder's commits, and the next run gets a note about what went wrong.
+
+**Project check.** `.agent/check.json` names a command that proves the project is healthy, and the task that makes it pass:
+
+```json
+{ "command": "npm test", "enabled_by": "TASK-4" }
+```
+
+The check runs in a fresh container once `enabled_by` passes. The run that flips the `enabled_by` task must make the check green too. Without `check.json`, Ralph warns and skips the check.
+
+**Parking.** The foundation is every task up to and including `enabled_by` (or just the first task without `check.json`). BLOCKED or DECIDE before the foundation is done stops the loop. After that, Ralph saves the run's work on the branch `ralph/parked/TASK-ID`, resets the working branch to where the run started, records a `parked` field in `tasks.json`, and skips the task and everything that depends on it. To unpark, remove the `parked` field, then merge or cherry-pick the branch.
+
+Ralph prints a summary of every run when it stops, also on Ctrl+C, and saves it to `.agent/history/SUMMARY-*.txt`.
 
 ## How Is This Different from Other Ralphs?
 
@@ -283,19 +320,28 @@ Other than OpenCode, each run uses a deterministic sandbox name in the form `ral
 
 ### Promise Tags
 
-Ralph uses semantic tags to communicate status:
-- `<promise>COMPLETE</promise>` - All tasks finished successfully
+Ralph reads these tags from the builder's final message:
+- `<promise>TASK-ID:DONE</promise>` - Informational, Ralph checks the work itself
+- `<promise>RETRY:reason</promise>` - Transient trouble, wait and rerun the task
 - `<promise>BLOCKED:reason</promise>` - Agent needs human help
 - `<promise>DECIDE:question</promise>` - Agent needs a decision
 
 ### Exit Codes
 
-| Code | Meaning                        |
-| ---- | ------------------------------ |
-| 0    | COMPLETE - All tasks finished  |
-| 1    | MAX_ITERATIONS - Reached limit |
-| 2    | BLOCKED - Needs human help     |
-| 3    | DECIDE - Needs human decision  |
+| Code | Meaning |
+| ---- | ------- |
+| 0    | All tasks finished |
+| 1    | Used all runs |
+| 2    | BLOCKED on a foundation task |
+| 3    | DECIDE on a foundation task |
+| 4    | Docker not ready on the first run |
+| 5    | Invalid API key on the first run |
+| 6    | Too many runs in a row without progress |
+| 7    | Gave up on a long environment outage |
+| 8    | Every remaining task is parked or depends on a parked task |
+| 9    | Setup error: invalid `tasks.json`, no commits, or a failed bookkeeping commit |
+| 130  | Ctrl+C |
+| 143  | SIGTERM |
 
 ## Structure
 
