@@ -88,6 +88,8 @@ STALLS=0
 ENV_STREAK=0
 OUTAGE_START=0
 ATTEMPT=0
+LAST_TASK_ID=""
+TASK_TRY=0
 NOTE=""
 
 while true; do
@@ -102,13 +104,21 @@ while true; do
     stop_loop "used all $MAX_ITERATIONS runs" "$EXIT_MAX_ITERATIONS"
   fi
   ATTEMPT=$((ATTEMPT + 1))
+  if [ "$TASK_ID" = "$LAST_TASK_ID" ]; then
+    TASK_TRY=$((TASK_TRY + 1))
+  else
+    LAST_TASK_ID=$TASK_ID
+    TASK_TRY=1
+  fi
   FOUNDATION_WAS_DONE=0
   if foundation_done; then
     FOUNDATION_WAS_DONE=1
   fi
 
+  TRY_LABEL=""
+  [ "$TASK_TRY" -gt 1 ] && TRY_LABEL=" (try $TASK_TRY)"
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-  echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R} (attempt $ATTEMPT)"
+  echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R}$TRY_LABEL"
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
   echo ""
 
