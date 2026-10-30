@@ -73,7 +73,7 @@ class OpenCodeTests(unittest.TestCase):
             'cat "$EVENTS"\nreturn "$CHILD_EXIT"\n')
         complete = event("text", text="<promise>COMPLETE</promise>")
         finish = event("step_finish", reason="stop")
-        def exported(text, **changes):
+        def exported(text, trailing=(), **changes):
             message = {"id": "msg_final", "type": "assistant", "finish": "stop",
                        "time": {"created": 2, "completed": 3},
                        "content": [{"type": "text", "text": text}], **changes}
@@ -82,7 +82,8 @@ class OpenCodeTests(unittest.TestCase):
                 {"id": "msg_earlier", "type": "assistant", "finish": "tool-calls",
                  "time": {"created": 1, "completed": 2},
                  "content": [{"type": "text", "text": "<promise>BLOCKED:old</promise>"}]},
-                message]}, indent=2)
+                message, *trailing]}, indent=2)
+        idle = {"id": "msg_idle", "type": "idle", "outcome": "succeeded", "time": {"created": 4}}
 
         blocked = "<promise>BLOCKED:missing access</promise>"
         for output, status, export, export_exit, expected, outcome in [
@@ -92,6 +93,8 @@ class OpenCodeTests(unittest.TestCase):
             (complete, "0", exported("<promise>COMPLETE</promise>"), "0", 1, "no_progress"),
             (complete, "0", exported(blocked), "0", 2, "parked"),
             (complete, "0", exported("<promise>DECIDE:choose backend</promise>"), "0", 3, "parked"),
+            # Exports ending in an idle marker were classified as no_progress
+            (complete, "0", exported(blocked, trailing=[idle]), "0", 2, "parked"),
             (complete, "0", exported(blocked, finish="tool-calls"), "0", 1, "no_progress"),
             (complete, "0", exported(blocked, time={"created": 2}), "0", 1, "no_progress"),
             (complete, "0", "Export failed", "7", 1, "no_progress"),

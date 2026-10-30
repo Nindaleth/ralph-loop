@@ -122,7 +122,7 @@ extract_export_summary() {
   jq -Rnr --arg session "$session_id" --arg message "$message_id" '
     [inputs | fromjson? | select(type == "object" and .info.id == $session)] |
     if length != 1 then error("Missing matching session export") else .[0] end |
-    .messages[-1] |
+    [.messages[] | select(.type != "idle")] | last |
     if .id == $message and .type == "assistant" and .finish == "stop" and .error == null and
        (.time.completed | type) == "number"
     then [.content[] | select(.type == "text") | .text] | join("\n")
