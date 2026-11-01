@@ -30,7 +30,7 @@ option_value() {
 
 # Parse command line arguments
 # Sets: MAX_ITERATIONS, ONCE_FLAG, RALPH_AGENT, AGENT_EXTRA_ARGS,
-#       MAX_STALLS, and ITERATION_TIMEOUT, MAX_OUTAGE, CHECK_TIMEOUT in seconds
+#       MAX_STALLS, STOP_BEFORE_TASK, and timeout values in seconds
 # Usage: parse_arguments "$@"
 parse_arguments() {
   MAX_ITERATIONS=10
@@ -41,6 +41,7 @@ parse_arguments() {
   ITERATION_TIMEOUT=1800
   MAX_OUTAGE=10800
   CHECK_TIMEOUT=600
+  STOP_BEFORE_TASK=""
   local value
 
   while [[ $# -gt 0 ]]; do
@@ -80,6 +81,17 @@ parse_arguments() {
       --max-iterations=*)
         MAX_ITERATIONS="${1#*=}"
         shift
+        ;;
+      --stop-before-task|--stop-before-task=*)
+        if [ "$1" = --stop-before-task ]; then
+          value="${2:-}"
+          [[ "$value" = --* ]] && value=""
+          shift
+        else
+          value="${1#*=}"
+        fi
+        shift
+        STOP_BEFORE_TASK=$(option_value --stop-before-task "$value") || exit 1
         ;;
       --max-stalls|--max-stalls=*)
         if [ "$1" = --max-stalls ]; then value="${2:-}"; shift; else value="${1#*=}"; fi

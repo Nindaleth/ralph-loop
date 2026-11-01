@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -164,6 +165,62 @@ class LoopTests(unittest.TestCase):
                 if name == "park and route around":
                     git(project, "rev-parse", "--verify", "ralph/parked/TASK-2")
                     self.assertEqual(tasks_of(project)[1]["parked"]["reason"], QUESTION)
+
+    def test_task_boundary_excludes_agents_and_repeats_skip_reports(self):
+        parked = {"kind": "DECIDE"}
+        cases = [
+            ([T(1), T(2)], "TASK-1", [], [], 0),
+            ([T(1, True), T(2), T(3)], "TASK-2", [], [], 0),
+            ([T(1, True), T(2, True), T(3)], "TASK-2", [], [], 0),
+            ([T(1, True), {**T(2), "parked": parked}, T(3)], "TASK-2", [], [], 0),
+            ([T(1, True), {**T(2), "parked": parked}, T(3, deps=["TASK-2"]), T(4)],
+             "TASK-4", [], [], 0),
+            ([T(1, deps=["TASK-2"]), T(2)], "TASK-2", [], [], 0),
+            ([T(1, True), T(2, deps=["TASK-3"]), T(3, deps=["TASK-2"]), T(4)],
+             "TASK-4", [], [], 0),
+            ([T(1, True), T(49), T(40), T(50)], "TASK-40", [], ["TASK-49"], 0),
+            ([T(1), T(2)], "TASK-2", ["-n", "1"], ["TASK-1"], 0),
+            ([T(1)], "TASK-9", [], [], 9),
+            ([T(1)], "", [], [], 1),
+            ([T(1)], "", ["--once"], [], 1),
+            ([T(1, True), {**T(2), "parked": parked}, T(3, deps=["TASK-2"]), T(4), T(5)],
+             "TASK-5", ["-n", "1"], ["TASK-4", "TASK-4"], 0),
+        ]
+        for equals in (False, True):
+            for i, (tasks, boundary, args, prompted, code) in enumerate(cases):
+                with self.subTest(equals=equals, case=i):
+                    project = make_project(self.base / f"boundary-{equals}-{i}", tasks)
+                    before = (project / ".agent/tasks.json").read_text()
+                    option = [f"--stop-before-task={boundary}"] if equals else ["--stop-before-task"]
+                    if not equals and boundary:
+                        option.append(boundary)
+                    calls = [f"finish {task}" for task in prompted] or ["noop"]
+                    retry = len(prompted) == 2
+                    if retry:
+                        calls[0] = "budget_error"
+                    scripts, env, argv = self.scripted_ralph(project, calls, *option, *args)
+                    result = subprocess.run(argv, cwd=project, env=env, capture_output=True,
+                                            text=True, timeout=30, check=False)
+                    output = result.stdout + result.stderr
+                    self.assertEqual(result.returncode, code, output)
+                    self.assertEqual(len(list(scripts.glob("prompt-*"))), len(prompted), output)
+                    for n, task in enumerate(prompted, 1):
+                        self.assertRegex((scripts / f"prompt-{n}").read_text(), rf"Do {task}\b")
+                    if not prompted:
+                        self.assertEqual((project / ".agent/tasks.json").read_text(), before)
+                    if code == 0:
+                        self.assertIn(f"stopped before {boundary}", output)
+                        self.assertIn("no preceding task is runnable", output)
+                    if retry:
+                        sections = re.sub(r"\x1b\[[0-9;]*m", "", output).split("Skipping TASK-2:")
+                        self.assertEqual(len(sections), 4, output)
+                        self.assertNotIn("Skipping TASK-1:", output)
+                        for n, section in enumerate(sections[1:], 1):
+                            self.assertIn("parked", section)
+                            self.assertIn("Skipping TASK-3:", section)
+                            self.assertIn("parked TASK-2", section)
+                            expected = "Run 1 of 1" if n < 3 else "Ralph stopped: stopped before TASK-5"
+                            self.assertIn(expected, section)
 
     def test_outage_gives_up_after_max_outage(self):
         scripts, env, argv = self.scripted_ralph(

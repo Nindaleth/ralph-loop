@@ -19,11 +19,13 @@ validate_tasks() {
   else
     echo "Warning: $CHECK_FILE is missing, task completion is not checked by tests" >&2
   fi
-  problems=$(jq -r --arg gate "$gate" '
+  problems=$(jq -r --arg gate "$gate" --arg stop "${STOP_BEFORE_TASK:-}" '
     (map(.id)) as $ids
     | ([to_entries[] | {key: .value.id, value: .key}] | from_entries) as $pos
     | (if $gate != "" and ($ids | index($gate)) == null
        then "Error: enabled_by \($gate) in check.json is not a task" else empty end),
+      (if $stop != "" and ($ids | index($stop)) == null
+       then "Error: --stop-before-task names unknown task \($stop)" else empty end),
       (to_entries[] | .key as $i | .value as $t | ($t.dependencies // [])[]
        | if $pos[.] == null then "Error: \($t.id) depends on unknown task \(.)"
          elif $pos[.] > $i then "Warning: \($t.id) depends on \(.), which comes later in the list"
@@ -56,12 +58,65 @@ foundation_done() {
     "$TASKS_FILE" >/dev/null
 }
 
-# Echo the next runnable task ID, or nothing.
+# Echo the next runnable task ID before STOP_BEFORE_TASK, or nothing.
 next_task_id() {
-  jq -r '
+  jq -r --arg stop "${STOP_BEFORE_TASK:-}" '
     (map(select(.passes == true) | .id)) as $done
-    | first(.[] | select(.passes != true and .parked == null
+    | (if $stop == "" then length
+       else (map(.id) | index($stop)) // error("unknown task \($stop)") end) as $end
+    | first(.[0:$end][] | select(.passes != true and .parked == null
         and ((.dependencies // []) - $done | length) == 0) | .id) // empty
+  ' "$TASKS_FILE"
+}
+
+# Print skip reasons before selected_id, or before the boundary/end when empty.
+# Usage: skipped_task_lines <selected_id>
+skipped_task_lines() {
+  jq -r --arg selected "$1" --arg stop "${STOP_BEFORE_TASK:-}" '
+    . as $tasks
+    | (map({key: .id, value: .}) | from_entries) as $by_id
+    | def unfinished_closure($frontier; $seen):
+        ($frontier | map(select($by_id[.].passes != true)) - $seen | unique) as $new
+        | if $new == [] then $seen
+          else unfinished_closure(
+            [$new[] | select($by_id[.].parked == null)
+             | ($by_id[.].dependencies // [])[]]; $seen + $new)
+          end;
+      def reason($task):
+        if $task.parked != null then
+          {key: ["parked", $task.id],
+           text: "parked (\($task.parked.kind // "unknown"))"}
+        else
+          unfinished_closure($task.dependencies // []; []) as $reachable
+          | [$tasks[] | select(.parked != null and (.id as $id | $reachable | index($id)))
+             | .id] as $parked
+          | if $parked != [] then
+              {key: ["parked-dependencies", $parked],
+               text: "depend directly or transitively on parked \($parked | join(", "))"}
+            else
+              [($task.dependencies // [])[] | select($by_id[.].passes != true)] as $unmet
+              | {key: ["unfinished-dependencies", ($unmet | sort)],
+                 text: "unmet dependencies: \($unmet | join(", "))"}
+            end
+        end;
+      def task_label($ids):
+        if ($ids | length) == 1 then $ids[0]
+        elif all($ids[]; test("^TASK-[0-9]+$"))
+          and ([$ids[] | ltrimstr("TASK-") | tonumber] as $numbers
+               | all(range(1; $numbers | length); $numbers[.] == $numbers[. - 1] + 1))
+        then "\($ids[0]) to \($ids[-1])"
+        else $ids | join(", ") end;
+    (if $selected != "" then $selected else $stop end) as $limit
+    | (if $limit == "" then length
+       else (map(.id) | index($limit)) // error("unknown task \($limit)") end) as $end
+    | reduce (.[0:$end] | to_entries[] | select(.value.passes != true)) as $entry
+        ([];
+         reason($entry.value) as $reason
+         | if length > 0 and .[-1].key == $reason.key and .[-1].last + 1 == $entry.key then
+             .[-1].ids += [$entry.value.id] | .[-1].last = $entry.key
+           else . + [{ids: [$entry.value.id], last: $entry.key,
+                      key: $reason.key, text: $reason.text}] end)
+    | .[] | "Skipping \(task_label(.ids)): \(.text)"
   ' "$TASKS_FILE"
 }
 

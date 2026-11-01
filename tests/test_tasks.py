@@ -54,6 +54,42 @@ class TaskSelectionTests(unittest.TestCase):
                 self.assertEqual(rc, code, err)
                 self.assertIn(text, err)
 
+    def test_skip_reports_name_blockers_without_misleading_ranges(self):
+        parked = {"kind": "DECIDE"}
+        cases = [
+            ([T(1)], "TASK-1", []),
+            ([T(7, parked=parked), T(8, deps=["TASK-7"]),
+              T(9, deps=["TASK-8"]), T(15)], "TASK-15",
+             [("TASK-7", "parked"), ("TASK-8 to TASK-9", "TASK-7")]),
+            ([T(1, parked=parked), T(2, True, ["TASK-1"]),
+              T(4, deps=["TASK-2", "TASK-3"]), T(3)], "TASK-3",
+             [("TASK-1", "parked"), ("TASK-4", "TASK-3")]),
+            ([T(1, parked=parked), T(2, deps=["TASK-1"]), T(3, True),
+              T(4, deps=["TASK-1"]), T(5)], "TASK-5",
+             [("TASK-1", "parked"), ("TASK-2", "TASK-1"), ("TASK-4", "TASK-1")]),
+            ([T(1, parked=parked), T(8, deps=["TASK-1"]),
+              T(10, deps=["TASK-1"]), T(15)], "TASK-15",
+             [("TASK-1", "parked"), ("TASK-8, TASK-10", "TASK-1")]),
+            ([T(1, parked=parked), T(2, parked=parked),
+              T(3, deps=["TASK-1", "TASK-2"]), T(4)], "TASK-4",
+             [("TASK-1", "parked"), ("TASK-2", "parked"), ("TASK-3", "TASK-1, TASK-2")]),
+            ([T(1, deps=["TASK-2"]), T(2)], "TASK-2", [("TASK-1", "TASK-2")]),
+            ([T(1, deps=["TASK-2"]), T(2, deps=["TASK-1"])], "",
+             [("TASK-1", "TASK-2"), ("TASK-2", "TASK-1")]),
+        ]
+        for tasks, selected, expected in cases:
+            with self.subTest(tasks=tasks):
+                project = self.project(tasks)
+                before = (project / ".agent/tasks.json").read_text()
+                rc, output, err = self.run_fn(project, f'skipped_task_lines "{selected}"')
+                self.assertEqual(rc, 0, err)
+                lines = output.splitlines()
+                self.assertEqual(len(lines), len(expected), output)
+                for line, (label, cause) in zip(lines, expected):
+                    self.assertIn(f"Skipping {label}:", line)
+                    self.assertIn(cause, line)
+                self.assertEqual((project / ".agent/tasks.json").read_text(), before)
+
     def test_foundation_is_tasks_up_to_gate(self):
         tasks = [T(i) for i in range(1, 6)]
         check = {"command": "true", "enabled_by": "TASK-3"}

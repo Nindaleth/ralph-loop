@@ -95,6 +95,10 @@ NOTE=""
 while true; do
   TASK_ID=$(next_task_id) || stop_loop "cannot read .agent/tasks.json" "$EXIT_SETUP_ERROR"
   if [ -z "$TASK_ID" ]; then
+    skipped_task_lines "" || stop_loop "cannot explain skipped tasks" "$EXIT_SETUP_ERROR"
+    if [ -n "$STOP_BEFORE_TASK" ]; then
+      stop_loop "stopped before $STOP_BEFORE_TASK: no preceding task is runnable" "$EXIT_COMPLETE"
+    fi
     if [ "$(remaining_task_count)" = 0 ]; then
       stop_loop "all tasks complete" "$EXIT_COMPLETE"
     fi
@@ -117,6 +121,7 @@ while true; do
 
   TRY_LABEL=""
   [ "$TASK_TRY" -gt 1 ] && TRY_LABEL=" (try $TASK_TRY)"
+  skipped_task_lines "$TASK_ID" || stop_loop "cannot explain skipped tasks" "$EXIT_SETUP_ERROR"
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
   echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R}$TRY_LABEL"
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
