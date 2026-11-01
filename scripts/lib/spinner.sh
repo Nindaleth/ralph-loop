@@ -19,21 +19,26 @@ start_spinner() {
     local -a SPIN_CHARS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     local i=0
     local spin_len=${#SPIN_CHARS[@]}
-    local term_width=$(tput cols 2>/dev/null || echo 80)
-    local preview_max=$((term_width - 6))  # Leave room for "    > "
+    local term_width preview_max
     while true; do
+      term_width=$(get_terminal_width)
+      # The preview prefix uses six columns; keep the last column empty.
+      preview_max=$((term_width - 7))
       local step=$(cat "$STEP_FILE" 2>/dev/null || echo "Thinking")
       local preview=$(cat "$PREVIEW_LINE_FILE" 2>/dev/null || echo "")
       local char="${SPIN_CHARS[$i]}"
-      # Truncate preview if needed
-      if [ ${#preview} -gt $preview_max ]; then
-        preview="${preview:0:$((preview_max - 3))}..."
-      fi
       # Line 1: spinner + step, Line 2: dimmed preview
-      printf "\r\033[K  ${C}%s${R} %s" "$char" "$step"
-      if [ -n "$preview" ]; then
-        printf "\n\033[K    ${D}▸ %s${R}\033[A" "$preview"
+      printf '\r\033[K'
+      if [ "$term_width" -gt 4 ]; then
+        step=$(truncate_line "$step" "$((term_width - 5))")
+        printf "  ${C}%s${R} %s" "$char" "$step"
       fi
+      printf '\n\r\033[K'
+      if [ -n "$preview" ] && [ "$preview_max" -gt 0 ]; then
+        preview=$(truncate_line "$preview" "$preview_max")
+        printf "    ${D}\xe2\x96\xb8 %s${R}" "$preview"
+      fi
+      printf '\033[A\r'
       i=$(( (i + 1) % spin_len ))
       sleep 0.1
     done

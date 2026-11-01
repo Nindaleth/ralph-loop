@@ -27,31 +27,51 @@ check_ansi_support() {
 
 # Get terminal width (default to 80 if unavailable)
 get_terminal_width() {
-  if command -v tput &> /dev/null; then
-    local width=$(tput cols 2>/dev/null)
-    if [ -n "$width" ] && [ "$width" -gt 0 ]; then
-      echo "$width"
+  local size width
+  # Background jobs have no terminal on stdin; COLUMNS can also be stale.
+  if size=$(stty size 2>/dev/null < /dev/tty); then
+    width=${size##* }
+    if [[ "$width" =~ ^[1-9][0-9]*$ ]]; then
+      printf '%s\n' "$width"
       return
     fi
   fi
-  # Fallback to stty
-  if command -v stty &> /dev/null; then
-    local width=$(stty size 2>/dev/null | cut -d' ' -f2)
-    if [ -n "$width" ] && [ "$width" -gt 0 ]; then
-      echo "$width"
-      return
-    fi
+  if width=$(tput cols 2>/dev/null) && [[ "$width" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$width"
+    return
   fi
   echo "80"
 }
 
 # Truncate line to fit terminal width
 truncate_line() {
-  local line="$1"
-  local max_width="$2"
-  if [ ${#line} -gt $max_width ]; then
-    echo "${line:0:$((max_width - 3))}..."
-  else
-    echo "$line"
+  local LC_ALL=C.UTF-8
+  local line="$1" max_width="$2"
+  local length=${#line}
+  local i char char_width width=0 prefix=""
+  if [ "$max_width" -le 0 ]; then
+    printf '\n'
+    return
   fi
+  for ((i = 0; i < length; i++)); do
+    char=${line:i:1}
+    case "$char" in
+      [\ -~]) char_width=1 ;;
+      # Non-ASCII characters may occupy two terminal columns.
+      *) char_width=2 ;;
+    esac
+    width=$((width + char_width))
+    if [ "$width" -gt "$max_width" ]; then
+      if [ "$max_width" -lt 3 ]; then
+        printf '%.*s\n' "$max_width" '...'
+      else
+        printf '%s...\n' "$prefix"
+      fi
+      return
+    fi
+    if [ "$width" -le $((max_width - 3)) ]; then
+      prefix+="$char"
+    fi
+  done
+  printf '%s\n' "$line"
 }
