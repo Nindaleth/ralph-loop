@@ -210,6 +210,12 @@ display_session_step_totals() {
 detect_step() {
   local line="$1"
 
+  # Sentences that announce a skill or order work ("before committing") describe
+  # plans or past work, not the current step.
+  line=$(printf '%s' "$line" | tr '\n' ' ' | LC_ALL=C sed -E \
+    -e 's/(^|[.!?]|-)[[:space:]]*Using [^.!?]*[.!?]?//g' \
+    -e 's/[^.!?]*\b(before|after|once|until)\b[^.!?]*[.!?]?//g')
+
   # IMPLEMENTING - highest priority (includes building)
   # Tool-based: Write, Edit tools with file paths
   # Natural: creating, writing, editing, modifying, updating files
@@ -256,13 +262,13 @@ detect_step() {
     echo "Debugging"
 
   # LINTING - code style and formatting
-  elif echo "$line" | grep -qiE "(eslint|biome|lint|prettier|formatting|stylelint)"; then
+  elif echo "$line" | grep -qiE "(running|run|executing|checking) (the )?(eslint|biome|lint|linter|prettier|stylelint|ruff)"; then
     echo "Linting"
   elif echo "$line" | grep -qiE "Bash.*command=.*(lint|eslint|biome|prettier|stylelint)"; then
     echo "Linting"
 
   # TYPECHECKING - type validation
-  elif echo "$line" | grep -qiE "(npm run typecheck|tsc|typescript|type.?check|mypy|pyright)"; then
+  elif echo "$line" | grep -qiE "(running|run|executing|checking) (the )?(npm run typecheck|tsc|typescript|type.?check|mypy|pyright)"; then
     echo "Typechecking"
   elif echo "$line" | grep -qiE "Bash.*command=.*(typecheck|tsc|mypy|pyright)"; then
     echo "Typechecking"
