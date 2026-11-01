@@ -31,6 +31,7 @@ run_project_check() {
   output_file=$(mktemp)
   history_file="${HISTORY_DIR:-.agent/history}/CHECK-${SESSION_ID}-${ATTEMPT}.txt"
 
+  printf '  Running project checks (output saved to %s)...\n' "$history_file"
   start_agent_command "$command" "$output_file"
   if ! watch_agent_command $(( $(date +%s) + CHECK_TIMEOUT )); then
     status=124
