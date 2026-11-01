@@ -78,7 +78,6 @@ check_ansi_support
 
 show_ralph
 echo -e " ${C}Starting Ralph${R} ・ ${Y}v$VERSION${R} ・ Agent: ${Y}$RALPH_AGENT_NAME${R} ・ Sandbox: ${Y}$RALPH_SANDBOX_NAME${R} ・ Max iterations: ${Y}$MAX_ITERATIONS${R}"
-echo ""
 git rev-parse -q --verify HEAD >/dev/null || stop_loop "the repository has no commits yet" "$EXIT_SETUP_ERROR"
 git var GIT_COMMITTER_IDENT >/dev/null || stop_loop "git has no committer identity, set user.name and user.email" "$EXIT_SETUP_ERROR"
 validate_tasks || stop_loop "invalid tasks.json" "$EXIT_SETUP_ERROR"
@@ -122,8 +121,9 @@ while true; do
   TRY_LABEL=""
   [ "$TASK_TRY" -gt 1 ] && TRY_LABEL=" (try $TASK_TRY)"
   skipped_task_lines "$TASK_ID" || stop_loop "cannot explain skipped tasks" "$EXIT_SETUP_ERROR"
-  echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
-  echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R}$TRY_LABEL"
+  echo ""
+  echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
+  echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R} - ${Y}$(date +%H:%M:%S)${R}$TRY_LABEL"
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
   echo ""
 
