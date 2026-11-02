@@ -179,7 +179,6 @@ display_final_summary() {
   fi
 
   # Display with simple separators
-  echo ""
   echo -e "${C}─────────────────────────────────────────────────────────────────${R}"
   echo -e "${Y}Iteration Summary${R}"
   echo -e "${C}─────────────────────────────────────────────────────────────────${R}"
