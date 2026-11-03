@@ -141,7 +141,7 @@ show_help() {
   echo "  --max-iterations N, -n N    Set maximum iterations (default: 10)"
   echo "  --agent AGENT, -a AGENT     Select agent: $(supported_agents_list) (default: claude)"
   echo "  --once                      Run exactly 1 iteration (overrides --max-iterations)"
-  echo "  --status                    Show task counts, parked tasks and the next 5 runnable tasks, then exit"
+  echo "  --status                    Show task counts, parked tasks and the coming up tasks, then exit"
   echo "  --max-stalls N              Stop after N runs in a row without progress (default: 3)"
   echo "  --iteration-timeout TIME    Stop a run that takes longer than TIME (default: 30m)"
   echo "  --max-outage TIME           Give up after TIME of environment failures (default: 3h)"
