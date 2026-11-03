@@ -59,6 +59,11 @@ trap handle_terminate TERM
 
 # Parse arguments (sets MAX_ITERATIONS, ONCE_FLAG, RALPH_AGENT, AGENT_EXTRA_ARGS)
 parse_arguments "$@"
+if [ "$STATUS_FLAG" = true ]; then
+  trap - EXIT
+  task_status
+  exit 0
+fi
 RALPH_AGENT_NAME=$(agent_display_name "$RALPH_AGENT")
 RALPH_SANDBOX_NAME=$(build_sandbox_name "$RALPH_AGENT" "$SCRIPT_DIR")
 

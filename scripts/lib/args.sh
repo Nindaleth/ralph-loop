@@ -30,11 +30,12 @@ option_value() {
 
 # Parse command line arguments
 # Sets: MAX_ITERATIONS, ONCE_FLAG, RALPH_AGENT, AGENT_EXTRA_ARGS,
-#       MAX_STALLS, STOP_BEFORE_TASK, and timeout values in seconds
+#       MAX_STALLS, STOP_BEFORE_TASK, STATUS_FLAG, and timeout values in seconds
 # Usage: parse_arguments "$@"
 parse_arguments() {
   MAX_ITERATIONS=10
   ONCE_FLAG=false
+  STATUS_FLAG=false
   RALPH_AGENT="claude"
   AGENT_EXTRA_ARGS=()
   MAX_STALLS=3
@@ -56,6 +57,10 @@ parse_arguments() {
         ;;
       --once)
         ONCE_FLAG=true
+        shift
+        ;;
+      --status)
+        STATUS_FLAG=true
         shift
         ;;
       --agent|-a)

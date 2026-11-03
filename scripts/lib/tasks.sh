@@ -120,6 +120,25 @@ skipped_task_lines() {
   ' "$TASKS_FILE"
 }
 
+# Print task counts, parked tasks and the next five runnable tasks.
+task_status() {
+  local parked next
+  jq -r '(map(select(.passes == true) | .id)) as $done
+    | "total: \(length)",
+      "done: \($done | length)"' "$TASKS_FILE"
+  parked=$(parked_task_lines)
+  echo "parked:${parked:+$'\n'}${parked:- none}" | sed '2,$s/^/  /'
+  next=$(jq -r '(map(select(.passes == true) | .id)) as $done
+    | limit(5; .[] | select(.passes != true and .parked == null
+        and ((.dependencies // []) - $done | length) == 0) | .id)' "$TASKS_FILE")
+  echo "next 5:"
+  if [ -n "$next" ]; then
+    sed 's/^/  /' <<< "$next"
+  else
+    echo "  none"
+  fi
+}
+
 # Echo how many tasks do not pass yet.
 remaining_task_count() {
   jq -r 'map(select(.passes != true)) | length' "$TASKS_FILE"
