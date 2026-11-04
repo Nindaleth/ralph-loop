@@ -13,14 +13,27 @@ Only proceed after user confirmation.
 
 You should read the PRD markdown file located in `PROJECT_ROOT/.agent/prd/PRD.md`.
 Each task in the PRD will have a unique ID, formatted as `TASK-${ID}`.
-Use those IDs to generate the task list, except `TASK-1` is always reserved for prerequisite verification.
+For a new task list, use those IDs, except `TASK-1` is reserved for prerequisite verification. For an existing task list, follow the extension workflow below before assigning IDs.
+
+### Extending an existing task list
+
+If `PROJECT_ROOT/.agent/tasks.json` exists:
+
+1. Read the index and existing `.agent/tasks/TASK-*.json` specs. Identify the requested delta against the existing tasks and implementation, rather than regenerating tasks for the whole PRD.
+2. Preserve every existing index entry and its position, including IDs, dependencies, `specFilePath`, `passes`, `parked` and any other metadata. Leave existing spec files unchanged, including step completion states.
+3. Allocate new numeric IDs above the highest ID found in either the index or existing spec filenames. Never reuse gaps, renumber old tasks, or overwrite an existing spec. If proposed PRD IDs collide, assign fresh IDs and update the new task references in the PRD.
+4. Append new tasks with `passes: false` and new spec steps with `pass: false`. Dependencies may reference existing or new tasks. Represent follow-up work on completed functionality as new tasks, not by resetting old tasks.
+5. Keep the existing prerequisite task. If the delta introduces new prerequisites, append a new prerequisite-verification task using a fresh ID and make affected new tasks depend on it. Do not recreate `TASK-1`.
+6. Before presenting the delta for review, compare against the original index and specs: existing entries and specs must be unchanged, new IDs unique, and dependency references valid.
+
+For example, with completed `TASK-1` and `TASK-4`, parked `TASK-8`, and an existing `TASK-12.json` spec, the first added task is `TASK-13`. All old entries, states and specs stay unchanged.
 
 Copy and track progress:
 
 ```
 Task Generation Progress:
 - [ ] Analyze the complete PRD
-- [ ] Generate mandatory prerequisite verification task first
+- [ ] For a new list, generate prerequisite verification first; for an extension, preserve existing tasks and identify new prerequisite checks
 - [ ] Generate task index in `PROJECT_ROOT/.agent/tasks.json`
 - [ ] Generate detailed spec for each task in `PROJECT_ROOT/.agent/tasks/TASK-${ID}.json`
 - [ ] Present complete task list to user for review
@@ -31,7 +44,7 @@ If a question can be answered by exploring the codebase, explore the codebase in
 
 ## Mandatory First Task: Prerequisite Verification
 
-Every generated task list must start with `TASK-1: Verify project prerequisites and access`.
+Every new task list must start with `TASK-1: Verify project prerequisites and access`. Existing task lists follow the extension workflow instead; the template below is for a new list.
 
 Use the `Prerequisites and Access` section from `PROJECT_ROOT/.agent/prd/PRD.md` as the source of truth. This task must verify that implementation can safely begin before feature work starts.
 
@@ -131,7 +144,7 @@ Each task must follow this exact structure:
 - `category`: Classification of task type (see categories below)
 - `title`: A title that gives a high level overview of the task.
 - `specFilePath`: Path to the individual task specification file, formatted as `PROJECT_ROOT/.agent/tasks/TASK-${ID}.json`
-- `passes`: Always initialize to `false` - only developers update this after completion
+- `passes`: Initialize new tasks to `false`; preserve existing values during extensions. Only developers update this after completion
 
 ## Individual JSON Task Format
 
@@ -563,7 +576,7 @@ Use this category for the mandatory first task only unless the PRD requires addi
 
 ### Be Comprehensive
 
-Generate tasks that cover the entire PRD. Break down every feature into small, manageable tasks.
+For a new list, generate tasks that cover the entire PRD. For an extension, cover only the requested delta. Break down the relevant features into small, manageable tasks.
 Keep the main task list JSON concise and go into detail in the individual task files.
 
 **Example**: For "User Authentication" feature, generate tasks for:
@@ -639,9 +652,9 @@ For any story with UI changes: Always include "Verify in browser using playwrigh
 **Important:**
 End to end tests or unit tests are individual steps (verification criteria) in a task, but *CANNOT* be tasks themselves.
 
-### Initialize All Tasks to `"passes": false`
+### Initialize New Tasks to `"passes": false`
 
-**CRITICAL**: Never mark tasks as complete during generation. The `passes` field should ALWAYS be `false` initially.
+**CRITICAL**: Never mark newly generated tasks as complete. Initialize their `passes` fields and step `pass` fields to `false`. When extending a list, preserve all existing completion states.
 
 > It is unacceptable to remove or edit items in the task list because this could lead to missing or buggy functionality
 
@@ -649,7 +662,7 @@ Only developers should update `passes: true` after verifying all steps are compl
 
 ## Output Format
 
-Save the complete task list as `PROJECT_ROOT/.agent/tasks.json`:
+Save the complete task list as `PROJECT_ROOT/.agent/tasks.json`. For an extension, retain all existing entries unchanged and append the new entries. The following example is a new task list:
 
 ```json
 [
@@ -717,4 +730,4 @@ For a simple "Todo List App" PRD with features: user auth, create/read/update/de
 
 Note: Unit tests and E2E tests are verification steps within feature tasks, not separate tasks.
 
-Generate similar comprehensive breakdowns for any PRD.
+For a new list, generate similar comprehensive breakdowns for any PRD. For an extension, apply the same task sizing only to the requested delta.

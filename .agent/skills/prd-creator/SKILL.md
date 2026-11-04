@@ -75,8 +75,8 @@ You will need to analyze the completed PRD and generate a comprehensive task lis
 
 **What it does**:
 - Analyzes the completed PRD
-- Generates `TASK-1` as mandatory prerequisite verification
-- Generates a complete list of implementation tasks in JSON format, covering all features and requirements from the PRD
+- For a new task list, generates `TASK-1` as mandatory prerequisite verification
+- Generates implementation tasks covering the full PRD for a new list, or only the requested delta for an extension
 - Keeps the tasks small and manageable
 - Categorizes tasks by type (functional, ui-ux, api-endpoint, security, etc.)
 - Defines verification ('pass') steps for each task
@@ -100,6 +100,10 @@ The description should be short, concise and contain:
 
 ## Quick Start
 
+### Extending an existing task list
+
+If `.agent/tasks.json` exists, read it and the existing task specs before generating tasks. Preserve existing task IDs, index entries (including order, dependencies, `passes` and `parked`), and spec files unchanged. Append new incomplete tasks for the requested delta instead of regenerating the old list. Allocate new IDs above the highest numeric ID found in either the index or existing spec filenames; do not reuse gaps or overwrite specs. Follow the extension workflow in [JSON.md](JSON.md).
+
 **If user wants to create a PRD:**
 1. Read [PRD.md](PRD.md)
 2. Follow the PRD creation workflow
@@ -110,7 +114,7 @@ The description should be short, concise and contain:
 **If user wants implementation tasks for an existing PRD:**
 1. Read [JSON.md](JSON.md)
 2. Read the PRD file
-3. Generate comprehensive task list in JSON format, starting with `TASK-1` prerequisite verification
+3. If a task list exists, append tasks for the delta using the extension workflow. Otherwise generate a task list starting with `TASK-1` prerequisite verification
 4. Save as `tasks.json`
 
 **If user wants both:**
@@ -128,7 +132,7 @@ The description should be short, concise and contain:
 
 **If a user want to update the implementation tasks:**
 1. Read [JSON.md](JSON.md)
-2. Update the implementation tasks
+2. Append new tasks using the extension workflow; preserve existing entries and specs
 3. Save as `tasks.json`
 4. Ask user if they want to update the PRD again
 
@@ -152,7 +156,7 @@ If they are not present, warn the user and ask if they would like to create any 
 - Do not generate code - focus on documentation and task specification
 - Use AskUserQuestion extensively in Part 1 to clarify requirements
 - Never write real secret values to PRD, tasks, chat, logs, or `.env.local`; use placeholder values and tell the user to fill real values manually
-- In Part 2, generate comprehensive task lists (50-200+ tasks for typical projects)
-- In Part 2, always generate `TASK-1` as prerequisite verification before feature work
-- Always initialize tasks with `"passes": false` - never mark tasks complete during generation
+- For a new list, generate comprehensive coverage (50-200+ tasks for typical projects). For an extension, size the additions to the requested delta, not the whole project
+- For a new task list, generate `TASK-1` as prerequisite verification before feature work. For an extension, preserve the existing prerequisite task and add a new prerequisite task only if the delta needs new checks
+- Initialize only newly created tasks with `"passes": false` and their steps with `"pass": false`; preserve all existing completion states
 - Use available tools: AskUserQuestion, WebSearch, Sequential Thinking, Read
