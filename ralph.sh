@@ -126,9 +126,11 @@ while true; do
   TRY_LABEL=""
   [ "$TASK_TRY" -gt 1 ] && TRY_LABEL=" (try $TASK_TRY)"
   skipped_task_lines "$TASK_ID" || stop_loop "cannot explain skipped tasks" "$EXIT_SETUP_ERROR"
+  TASK_TITLE=$(jq -r '.title // empty' ".agent/tasks/$TASK_ID.json" 2>/dev/null) || TASK_TITLE=""
   echo ""
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
   echo -e "  ↪ ${R}Run ${Y}$((RUNS_USED + 1))${R} of ${Y}$MAX_ITERATIONS${R} - ${Y}$TASK_ID${R} - ${Y}$(date +%H:%M:%S)${R}$TRY_LABEL"
+  if [ -n "$TASK_TITLE" ]; then printf '    %s\n' "$TASK_TITLE"; fi
   echo -e "${B}░░▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░${R}"
   echo ""
 
